@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  name         String   @db.VarChar(10)
+  nip          String?  @db.VarChar(15)
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  createdAt    DateTime @default(now())
+  offers       Offer[]
+}
+
+model Offer {
+  id             String           @id @default(cuid())
+  clientId       String
+  offerNo        String?
+  vendorOrderNo  String?
+  invoiceNo      String?
+  currency       String           @default("PLN")
+  valueNet       Decimal?         @db.Decimal(18, 2)
+  notes          String?
+  wartoscKosztow Decimal?         @db.Decimal(18, 2)
+  zysk           Decimal?         @db.Decimal(18, 2)
+  marza          Decimal?         @db.Decimal(6, 2)
+  createdAt      DateTime         @default(now())
+  title          String?
+  authorInitials String?
+  contractor     String?
+  note           String?
+  offerMonth     String?          @db.VarChar(7)
+  Document       Document[]
+  client         Client           @relation(fields: [clientId], references: [id])
+  costs          OfferCost[]
+  milestones     OfferMilestone[]
+
+  @@index([offerMonth])
+  @@index([invoiceNo])
+  @@index([offerNo])
+}
+
+model OfferCost {
+  id        String   @id @default(cuid())
+  offerId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  valueNet  Decimal  @db.Decimal(14, 2)
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId])
+}
+
+model OfferMilestone {
+  id         String        @id @default(cuid())
+  offerId    String
+  step       MilestoneStep
+  occurredAt DateTime
+  offer      Offer         @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, occurredAt])
+}
+
+model AuditLog {
+  id       String   @id
+  actor    String?
+  entity   String
+  entityId String
+  action   String
+  before   Json?
+  after    Json?
+  at       DateTime @default(now())
+}
+
+model Document {
+  id          String    @id
+  offerId     String?
+  docType     String
+  status      String
+  fileKey     String?
+  checksum    String?
+  submittedAt DateTime?
+  Offer       Offer?    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+}
+
+enum MilestoneStep {
+  ZAPYTANIE
+  WYSLANIE
+  AKCEPTACJA_ZLECENIE
+  WYKONANIE
+  PROTOKOL_WYSLANY
+  ODBIOR_PRAC
+  PWF
+}
