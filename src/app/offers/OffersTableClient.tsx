@@ -40,32 +40,32 @@ export default function OffersTableClient({
   row1Top = 0,
   row2Top = 40,
 }: {
-  rows: OfferRow[];
+  rows?: OfferRow[];             // <— opcjonalne
   headerBg: string;
   rowAccent: string;
   row1Top?: number;
   row2Top?: number;
 }) {
-  // Hooki zawsze w tej samej kolejności:
+  // Zawsze pracujemy na tablicy
+  const data: OfferRow[] = Array.isArray(rows) ? rows : [];
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Obliczenia przed warunkowym zwrotem:
   const totals = useMemo(() => {
-    return rows.reduce(
+    return data.reduce(
       (acc, o) => {
         const net = o.valueNet ?? 0;
-        const cost = o.costs.reduce((s, c) => s + (Number(c.valueNet) || 0), 0);
+        const cost = (o.costs ?? []).reduce((s, c) => s + (Number(c?.valueNet) || 0), 0);
         return { net: acc.net + net, cost: acc.cost + cost };
       },
       { net: 0, cost: 0 }
     );
-  }, [rows]);
+  }, [data]);
 
   const totalProfit = totals.net - totals.cost;
   const totalMargin = totals.net > 0 ? (totalProfit / totals.net) * 100 : null;
 
-  // Render dopiero po zamontowaniu (eliminuje hydrację tabeli):
   if (!mounted) return null;
 
   return (
@@ -168,9 +168,9 @@ export default function OffersTableClient({
       </thead>
 
       <tbody>
-        {rows.map((o) => {
+        {data.map((o) => {
           const netto = o.valueNet ?? 0;
-          const koszty = o.costs.reduce((acc, it) => acc + (Number(it?.valueNet) || 0), 0);
+          const koszty = (o.costs ?? []).reduce((acc, it) => acc + (Number(it?.valueNet) || 0), 0);
           const zysk = netto - koszty;
           const marza = netto > 0 ? (zysk / netto) * 100 : null;
 
@@ -198,7 +198,8 @@ export default function OffersTableClient({
               <td className="py-2 pr-3 whitespace-nowrap text-right tabular-nums">{formatMoney(netto)}</td>
 
               {STEP_ORDER.map((s) => {
-                const when = o.milestones.find((m) => String(m.step) === s)?.occurredAt ?? null;
+                const when =
+                  (o.milestones ?? []).find((m) => String(m.step) === s)?.occurredAt ?? null;
                 return (
                   <td key={s} className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
                     {formatISODate(when)}

@@ -3,22 +3,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Step =
-  | "WYSLANIE"
-  | "AKCEPTACJA_ZLECENIE"
-  | "WYKONANIE"
-  | "PROTOKOL_WYSLANY"
-  | "ODBIOR_PRAC"
-  | "PWF";
+type Props = {
+  id: string;
+  initialDates?: Record<string, string | null | undefined>;
+};
 
-const STEP_ORDER: Step[] = [
+// Porządek kroków i etykiety
+const STEP_ORDER = [
   "WYSLANIE",
   "AKCEPTACJA_ZLECENIE",
   "WYKONANIE",
   "PROTOKOL_WYSLANY",
   "ODBIOR_PRAC",
   "PWF",
-];
+] as const;
+type Step = typeof STEP_ORDER[number];
 
 const STEP_LABEL: Record<Step, string> = {
   WYSLANIE: "Data wysłania",
@@ -29,202 +28,182 @@ const STEP_LABEL: Record<Step, string> = {
   PWF: "Data PWF",
 };
 
-function normalizeDateInput(v: any): string {
+// Normalizacja: "", "YYYY-MM-DD", ISO → "YYYY-MM-DD"
+function normalizeDate(v: any): string {
   if (!v) return "";
-  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  const d = new Date(String(v));
-  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
 }
 
-function toDatesRecordLoose(data: any): Record<string, string> {
-  const arr = Array.isArray(data?.items)
-    ? data.items
-    : Array.isArray(data?.milestones)
-    ? data.milestones
-    : null;
-
-  if (arr) {
-    const out: Record<string, string> = {};
-    for (const it of arr) {
+// Parsowanie odpowiedzi GET /milestones (płasko lub items[])
+function parseMilestones(data: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (Array.isArray(data?.items)) {
+    for (const it of data.items) {
       const step = it?.step || it?.name || it?.code;
       const when =
         it?.occurredAt ??
         it?.occurred_at ??
         it?.date ??
         it?.occurred ??
-        it?.at;
-      if (step) out[step] = normalizeDateInput(when);
+        it?.at ??
+        "";
+      if (step) out[step] = normalizeDate(when);
     }
     return out;
   }
-
   if (data && typeof data === "object") {
-    const out: Record<string, string> = {};
-    for (const k of STEP_ORDER) out[k] = normalizeDateInput((data as any)[k]);
+    for (const k of STEP_ORDER) out[k] = normalizeDate((data as any)[k]);
     return out;
   }
-
-  return {};
+  return out;
 }
 
-export default function EditDates({
-  offerId,
-  initialDates,
-}: {
-  offerId: string;
-  initialDates?: Record<string, string>;
-}) {
-  const startNormalized = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const k of STEP_ORDER) out[k] = normalizeDateInput((initialDates || {})[k]);
-    return out;
+export default function EditDates({ id, initialDates = {} }: Props) {
+  // Stan wejściowy → normalizacja
+  const initialNorm = useMemo(() => {
+    const r: Record<string, string> = {};
+    for (const k of STEP_ORDER) r[k] = normalizeDate(initialDates[k]);
+    return r;
   }, [initialDates]);
 
-  const [dates, setDates] = useState<Record<string, string>>({ ...startNormalized });
-  const [baseline, setBaseline] = useState<Record<string, string>>({ ...startNormalized });
+  const [dates, setDates] = useState<Record<string, string>>(initialNorm);
+  const [saved, setSaved] = useState<Record<string, string>>(initialNorm);
 
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const wyslanieEmpty = !dates.WYSLANIE; // ← warunek pokazywania „Usuń ofertę”
-
-  async function refreshFromApi() {
-    try {
-      const bust = `t=${Date.now()}`;
-      const r = await fetch(`/api/offers/${offerId}/milestones?${bust}`, { cache: "no-store" });
-      if (!r.ok) return;
-      const data = await r.json();
-      const rec = toDatesRecordLoose(data);
-      setDates(rec);
-      setBaseline(rec);
-    } catch {}
-  }
-
-  useEffect(() => {
-    refreshFromApi();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offerId]);
-
-  const dirtyKeys = STEP_ORDER.filter((k) => (dates[k] || "") !== (baseline[k] || ""));
+  // Difflist
+  const dirtyKeys = STEP_ORDER.filter((k) => (dates[k] || "") !== (saved[k] || ""));
   const anyDirty = dirtyKeys.length > 0;
 
-  async function saveDates() {
+  // Toast
+  const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Refetch po montażu i po zapisie (źródło prawdy = backend)
+  async function refetch() {
     try {
-      if (!anyDirty) return;
-      setSaving(true);
+      const res = await fetch(`/api/offers/${id}/milestones`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const parsed = parseMilestones(data);
+      setDates(parsed);
+      setSaved(parsed);
+    } catch {}
+  }
+  useEffect(() => {
+    refetch();
+  }, [id]);
 
-      const payload: Record<string, string | null> = {};
-      for (const step of STEP_ORDER) payload[step] = dates[step] ? dates[step] : null;
-
-      const res = await fetch(`/api/offers/${offerId}/milestones`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status} ${res.statusText}`);
-      }
-
-      await refreshFromApi();
-
-      setMsg("Zapisano daty etapów.");
-      setTimeout(() => setMsg(null), 1200);
-
-      setToast({ type: "success", text: "Zapisano daty etapów" });
-      setTimeout(() => setToast(null), 1500);
-
-      // 🔔 powiadom StatusPanel (i inne)
-      window.dispatchEvent(new CustomEvent("offer-dates-saved", { detail: { offerId } }));
-    } catch (e: any) {
-      setMsg(e?.message || "Błąd zapisu dat.");
-      setToast({ type: "error", text: e?.message || "Błąd zapisu dat" });
-      setTimeout(() => setToast(null), 2500);
-    } finally {
-      setSaving(false);
-    }
+  // Zależności między etapami: każdy kolejny wymaga wcześniejszego
+  function minFor(idx: number) {
+    const prevKey = STEP_ORDER[idx - 1];
+    return idx > 0 && dates[prevKey] ? dates[prevKey] : undefined;
+  }
+  function enabledFor(idx: number) {
+    return idx === 0 ? true : Boolean(dates[STEP_ORDER[idx - 1]]);
   }
 
-  async function deleteOffer() {
+  // Zapis całego obiektu — wysyłamy płasko + items[] + replace: true
+  async function saveDates() {
     try {
-      if (!wyslanieEmpty) return; // zabezpieczenie
-      if (!confirm("Na pewno usunąć tę ofertę? Operacja nieodwracalna.")) return;
+      if (!anyDirty || saving) return;
+      setSaving(true);
 
-      const res = await fetch(`/api/offers/${offerId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
+      const flatPayload: Record<string, string | null> = {};
+      const items: Array<{ step: string; occurredAt: string }> = [];
+      for (const k of STEP_ORDER) {
+        const v = dates[k];
+        flatPayload[k] = v ? v : null;
+        if (v) items.push({ step: k, occurredAt: v });
+      }
 
-      // opcjonalny toast (i tak zaraz redirect)
-      setToast({ type: "success", text: "Usunięto ofertę" });
-      // redirect do listy
-      window.location.href = "/offers?msg=deleted";
+      const res = await fetch(`/api/offers/${id}/milestones`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        // Wspieramy oba formaty + jawne "replace"
+        body: JSON.stringify({ ...flatPayload, items, replace: true }),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+
+      await refetch(); // synchronizacja -> dirty znika
+      // Powiadom inne panele
+      window.dispatchEvent(new CustomEvent("offer-dates-saved", { detail: { offerId: id } }));
+
+      setMsg({ type: "success", text: "Zapisano daty etapów." });
+      setTimeout(() => setMsg(null), 1500);
     } catch (e: any) {
-      setToast({ type: "error", text: e?.message || "Nie udało się usunąć oferty" });
-      setTimeout(() => setToast(null), 2500);
+      setMsg({ type: "error", text: e?.message || "Błąd zapisu dat." });
+      setTimeout(() => setMsg(null), 3000);
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
       {/* Toast */}
-      {toast && (
+      {msg && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow
-            ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}
+          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${
+            msg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+          }`}
         >
-          {toast.text}
+          {msg.text}
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-semibold">Daty etapów</div>
-
-        {/* 🔴 Usuń ofertę – tylko gdy brak daty wysłania */}
-        {wyslanieEmpty && (
-          <button
-            onClick={deleteOffer}
-            className="rounded px-3 py-1 border text-orange-600 border-orange-400 bg-white
-				hover:bg-red-600 hover:border-red-600 hover:text-white
-				transition-colors"
-            title="Usuń ofertę (dostępne tylko dopóki nie wysłano oferty)"
-          >
-            Usuń ofertę
-          </button>
-        )}
-      </div>
+      <div className="font-semibold mb-2">Daty etapów</div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {STEP_ORDER.map((step, idx) => {
-          const enabled = idx === 0 ? true : Boolean(dates[STEP_ORDER[idx - 1]]);
-          const dirty = (dates[step] || "") !== (baseline[step] || "");
-          const min = idx > 0 && dates[STEP_ORDER[idx - 1]] ? dates[STEP_ORDER[idx - 1]] : undefined;
+          const dirty = (dates[step] || "") !== (saved[step] || "");
+          const enabled = enabledFor(idx);
+          const min = minFor(idx);
 
           return (
             <label key={step} className="grid gap-1">
               <span
-                className={`text-sm ${dirty ? "text-amber-700 font-medium" : "text-gray-700"} ${
-                  !enabled ? "opacity-70" : ""
-                }`}
+                className={`text-sm ${
+                  dirty ? "text-amber-700 font-medium" : "text-gray-700"
+                } ${!enabled ? "opacity-70" : ""}`}
               >
-                {STEP_LABEL[step]}
+                {STEP_LABEL[step as Step]}
               </span>
               <input
                 type="date"
                 className={`border rounded px-2 py-1 ${
-                  dirty ? "ring-1 ring-yellow-400 bg-yellow-50 " : ""
-                } ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed " : ""}`}
+                  dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                } ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
                 value={dates[step] || ""}
                 onChange={(e) => setDates((m) => ({ ...m, [step]: e.target.value }))}
-                disabled={!enabled}
+                disabled={!enabled || saving}
                 min={min}
                 title={enabled ? "" : "Najpierw uzupełnij wcześniejsze etapy"}
               />
+              {/* Guzik czyszczenia pojedynczej daty */}
+              {dates[step] && (
+                <button
+                  type="button"
+                  onClick={() => setDates((m) => ({ ...m, [step]: "" }))}
+                  className="justify-self-start text-xs text-gray-600 hover:text-gray-800 underline"
+                  disabled={saving}
+                >
+                  Wyczyść
+                </button>
+              )}
             </label>
           );
         })}
       </div>
 
+      {/* PRZYCISK ZAPISU DAT — czerwony tylko gdy są NIEZAPISANE zmiany */}
       <div className="mt-3 flex items-center justify-end gap-2">
         <div className="text-sm text-gray-600">
           {anyDirty ? `Niezapisane daty: ${dirtyKeys.length}` : ""}
@@ -232,15 +211,16 @@ export default function EditDates({
         <button
           onClick={saveDates}
           disabled={!anyDirty || saving}
+          aria-busy={saving}
           className={
             "rounded px-3 py-1 " +
             (anyDirty
-              ? "border border-red-500 text-white bg-red-600 hover:bg-red-700"
+              ? "border border-red-500 text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
               : "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50")
           }
           title={anyDirty ? "Zapisz zmienione daty" : "Brak zmian do zapisania"}
         >
-          Zapisz daty
+          {saving ? "Zapisywanie…" : "Zapisz daty"}
         </button>
       </div>
     </div>

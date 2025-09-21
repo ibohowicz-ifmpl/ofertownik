@@ -97,7 +97,7 @@ export default async function OffersPage({
     orderBy: { offerNo: dir as any },
   } as any);
 
-  // (Opcjonalnie) sort po MIN(occurredAt) dla wybranego kroku
+  // (opcjonalnie) sort po MIN(occurredAt) dla wybranego kroku
   let offerMinDate = new Map<string, Date | null>();
   if (selStep) {
     const params: any[] = [selStep];
@@ -134,7 +134,7 @@ export default async function OffersPage({
     });
   }
 
-  // Zbuduj „płaskie” dane do CSR
+  // Dane do tabeli (CSR)
   const rows: OfferRow[] = offers.map((o: any) => ({
     id: String(o.id),
     offerNo: o.offerNo ?? null,

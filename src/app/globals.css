@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* === Ofertownik: animowane tło startowej === */
+
+.blob {
+  position: absolute;
+  width: 42vmin;
+  height: 42vmin;
+  border-radius: 55% 45% 60% 40% / 55% 45% 60% 40%;
+  filter: blur(24px);
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+  background:
+    radial-gradient(circle at 30% 30%, #5FD3DA 0%, rgba(95,211,218,0) 60%),
+    radial-gradient(circle at 70% 70%, #34BFC8 0%, rgba(52,191,200,0) 60%);
+  animation: ofertownik-float1 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+.blob-a { top: 8%;  left: 55%; animation-delay: 0s; }
+.blob-b { bottom: 6%; left: 12%; animation-delay: 3s; }
+.blob-c { top: 38%; right: 8%; width: 36vmin; height: 36vmin; animation-delay: 6s; }
+
+@keyframes ofertownik-float1 {
+  0%   { transform: translate3d(0,0,0) rotate(0deg) scale(1) }
+  25%  { transform: translate3d(2vw,-1vh,0) rotate(6deg) scale(1.02) }
+  50%  { transform: translate3d(-1vw,1.6vh,0) rotate(-4deg) scale(0.99) }
+  75%  { transform: translate3d(1vw,0.6vh,0) rotate(4deg) scale(1.01) }
+  100% { transform: translate3d(0,0,0) rotate(0deg) scale(1) }
+}
+
+/* Delikatne kołysanie „mgiełek” SVG */
+.float-svg {
+  animation: ofertownik-float2 28s ease-in-out infinite;
+  will-change: transform;
+}
+.delay-2000 { animation-delay: 2s; }
+.delay-4000 { animation-delay: 4s; }
+
+@keyframes ofertownik-float2 {
+  0%   { transform: translate3d(0,0,0) scale(1) }
+  33%  { transform: translate3d(-0.8vw,0.8vh,0) scale(1.02) }
+  66%  { transform: translate3d(1vw,-0.6vh,0) scale(0.99) }
+  100% { transform: translate3d(0,0,0) scale(1) }
+}

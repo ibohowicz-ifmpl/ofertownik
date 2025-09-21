@@ -1,83 +1,121 @@
+// src/app/api/offers/[id]/milestones/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// GET /api/offers/[id]/milestones -> { items: [{ id, step, occurredAt }] }
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  try {
-    const items = await prisma.offerMilestone.findMany({
-      where: { offerId: id },
-      select: { id: true, step: true, occurredAt: true },
-      orderBy: { occurredAt: "asc" },
-    });
-    return NextResponse.json({ items });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
-  }
+type Step =
+  | "WYSLANIE"
+  | "AKCEPTACJA_ZLECENIE"
+  | "WYKONANIE"
+  | "PROTOKOL_WYSLANY"
+  | "ODBIOR_PRAC"
+  | "PWF";
+
+const STEP_ORDER: Step[] = [
+  "WYSLANIE",
+  "AKCEPTACJA_ZLECENIE",
+  "WYKONANIE",
+  "PROTOKOL_WYSLANY",
+  "ODBIOR_PRAC",
+  "PWF",
+];
+
+function normDate(v: any): string | null {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // YYYY-MM-DD
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-// PUT /api/offers/[id]/milestones
-// Body: { [stepName: string]: "YYYY-MM-DD"|null } — przy null kasujemy wpis
-export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  try {
-    const body = await req.json();
+// GET: zwracamy spójnie items[]
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params; // Next 15: await!
+  const rows = await prisma.offerMilestone.findMany({
+    where: { offerId: id },
+    select: { step: true, occurredAt: true },
+    orderBy: [{ occurredAt: "asc" }],
+  });
 
-    // Lista kroków zgodna z UI, ale akceptujemy dowolne stringi (DB-pull safe)
-    const STEPS = [
-      "WYSLANIE",
-      "AKCEPTACJA_ZLECENIE",
-      "WYKONANIE",
-      "PROTOKOL_WYSLANY",
-      "ODBIOR_PRAC",
-      "PWF",
-    ];
+  return NextResponse.json({
+    items: rows.map((r) => ({
+      step: r.step,
+      occurredAt: r.occurredAt.toISOString().slice(0, 10),
+    })),
+  });
+}
 
-    await prisma.$transaction(async (tx) => {
-      for (const key of STEPS) {
-        const raw = body?.[key] as string | null | undefined;
+// PUT: przyjmujemy płasko (WYSLANIE: "YYYY-MM-DD" | null, ...) i/lub items[], opcjonalnie replace
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params; // Next 15: await!
+  const body = await req.json().catch(() => ({} as any));
 
-        // kasujemy, jeśli null/""/undefined
-        if (!raw) {
-          await tx.offerMilestone.deleteMany({ where: { offerId: id, step: key } });
-          continue;
-        }
+  const incoming = new Map<Step, string | null>();
 
-        // parsuj YYYY-MM-DD → Date (UTC północ)
-        const iso = /^\d{4}-\d{2}-\d{2}$/.test(String(raw)) ? String(raw) : null;
-        if (!iso) {
-          // nieprawidłowy format – pomijamy ten krok (albo można rzucić 400)
-          await tx.offerMilestone.deleteMany({ where: { offerId: id, step: key } });
-          continue;
-        }
-        const when = new Date(`${iso}T00:00:00.000Z`);
+  // a) items[]
+  if (Array.isArray(body?.items)) {
+    for (const it of body.items) {
+      const step = (it?.step || it?.name || it?.code) as Step;
+      if (!STEP_ORDER.includes(step)) continue;
+      const when = normDate(
+        it?.occurredAt ?? it?.occurred_at ?? it?.date ?? it?.occurred ?? it?.at
+      );
+      incoming.set(step, when);
+    }
+  }
+  // b) płasko (nadpisuje items[] jeśli oba są)
+  for (const k of STEP_ORDER) {
+    if (k in body) incoming.set(k, normDate(body[k]));
+  }
 
-        // Spróbuj update, a jeśli nic nie zaktualizowano – create (bez wymagania unikalnego indeksu)
-        const res = await tx.offerMilestone.updateMany({
-          where: { offerId: id, step: key },
-          data: { occurredAt: when },
-        });
-        if (res.count === 0) {
-          await tx.offerMilestone.create({
-            data: { offerId: id, step: key, occurredAt: when },
+  if (incoming.size === 0) {
+    return new NextResponse("Brak danych do zapisu", { status: 400 });
+  }
+
+  const replace = Boolean(body?.replace);
+
+  // przygotuj create dla dat niepustych
+  const toCreate = Array.from(incoming.entries())
+    .filter(([_, d]) => d)
+    .map(([step, d]) => ({
+      offerId: id,
+      step, // enum MilestoneStep
+      occurredAt: new Date(String(d) + "T00:00:00.000Z"),
+    }));
+
+  await prisma.$transaction(async (tx) => {
+    if (replace) {
+      // pełne zastąpienie — czyści wszystko dla oferty
+      await tx.offerMilestone.deleteMany({ where: { offerId: id } });
+      if (toCreate.length) await tx.offerMilestone.createMany({ data: toCreate });
+    } else {
+      // częściowa aktualizacja — null ⇒ DELETE; data ⇒ UPSERT
+      for (const [step, val] of incoming.entries()) {
+        if (!val) {
+          await tx.offerMilestone.deleteMany({ where: { offerId: id, step } });
+        } else {
+          const d = new Date(String(val) + "T00:00:00.000Z");
+          await tx.offerMilestone.upsert({
+            // nazwa 1:1 z @@unique(name: "OfferMilestone_offerId_step")
+            where: { OfferMilestone_offerId_step: { offerId: id, step } },
+            create: { offerId: id, step, occurredAt: d },
+            update: { occurredAt: d },
           });
         }
       }
-    });
+    }
+  });
 
-    const items = await prisma.offerMilestone.findMany({
-      where: { offerId: id },
-      select: { id: true, step: true, occurredAt: true },
-      orderBy: { occurredAt: "asc" },
-    });
-    return NextResponse.json({ items });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
-  }
+  // zwróć świeże dane
+  const rows = await prisma.offerMilestone.findMany({
+    where: { offerId: id },
+    select: { step: true, occurredAt: true },
+    orderBy: [{ occurredAt: "asc" }],
+  });
+
+  return NextResponse.json({
+    items: rows.map((r) => ({
+      step: r.step,
+      occurredAt: r.occurredAt.toISOString().slice(0, 10),
+    })),
+  });
 }

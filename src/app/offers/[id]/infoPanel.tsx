@@ -8,8 +8,6 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
   const [baseline, setBaseline] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
-  // Toast: sukces/błąd
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const dirty = useMemo(() => note !== baseline, [note, baseline]);
@@ -48,11 +46,9 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
         body: JSON.stringify(payload),
       });
       if (!r.ok) throw new Error(await r.text());
-
       setBaseline(note);
       setMsg("Zapisano notatkę");
       setTimeout(() => setMsg(null), 1200);
-
       setToast({ type: "success", text: "Zapisano notatkę" });
       setTimeout(() => setToast(null), 1500);
     } catch (e: any) {
@@ -64,26 +60,15 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
     }
   }
 
-  // (opcjonalne) globalne „zapisz wszystko”
-  useEffect(() => {
-    const handler = () => {
-      if (dirty && !saving) {
-        void saveNote();
-      }
-    };
-    window.addEventListener("offer-save-all", handler as EventListener);
-    return () => window.removeEventListener("offer-save-all", handler as EventListener);
-  }, [dirty, saving]);
-
   return (
     <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
-      {/* Toast */}
       {toast && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow
-            ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}
+          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${
+            toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+          }`}
         >
           {toast.text}
         </div>

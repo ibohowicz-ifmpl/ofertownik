@@ -1,22 +1,15 @@
 ﻿// src/lib/prisma.ts
 import { PrismaClient } from "@prisma/client";
-import registerOfferMonthMiddleware from "./prisma-middleware";
 
-const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient;
-  _offerMonthMW?: boolean;
-};
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ["warn", "error"], // mniej szumu
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   });
 
-// Zarejestruj middleware tylko raz (ważne w dev przy HMR)
-if (!globalForPrisma._offerMonthMW) {
-  registerOfferMonthMiddleware(prisma);
-  globalForPrisma._offerMonthMW = true;
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
 }
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;

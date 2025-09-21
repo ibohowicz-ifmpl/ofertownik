@@ -1,81 +1,69 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-/**
- * GET /api/offers/[id]/costs
- * Zwraca koszty w stabilnej kolejności (id ASC).
- */
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-
-  const items = await prisma.offerCost.findMany({
+// GET /api/offers/:id/costs -> { items: [{id,name,valueNet}] }
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params; // Next 15: await!
+  const rows = await prisma.offerCost.findMany({
     where: { offerId: id },
-    orderBy: { id: "asc" },
+    orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json({ items });
+  return NextResponse.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      valueNet: Number(r.valueNet),
+    })),
+  });
 }
 
-/**
- * PUT /api/offers/[id]/costs
- * Oczekuje: { items: { id?, name: string, valueNet: string|"X.XX"|number|null }[] }
- * Strategia: pełna wymiana listy kosztów dla oferty.
- * Po zapisie zwracamy posortowane items (id ASC), aby frontend miał stabilny baseline.
- */
-export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
+// PUT /api/offers/:id/costs
+// body: { items: [{ name: string, valueNet: number|string }] }
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params; // Next 15: await!
+  const body = await req.json().catch(() => ({} as any));
+  const items = Array.isArray(body?.items) ? body.items : [];
 
-  const body = await req.json().catch(() => ({}));
-  const raw = Array.isArray(body?.items) ? body.items : [];
-
-  // Normalizacja wejścia
-  const cleaned = raw
+  // Normalizacja i walidacja
+  const clean = items
     .map((it: any) => {
       const name = String(it?.name ?? "").trim();
-      if (!name) return null;
-
-      const v = it?.valueNet;
-      let valueNet: number | null = null;
-      if (typeof v === "number") valueNet = Number.isFinite(v) ? v : null;
-      else if (typeof v === "string") {
-        const n = Number(v.replace(",", "."));
-        valueNet = Number.isFinite(n) ? n : null;
-      }
-
+      const valueRaw = String(it?.valueNet ?? "0").replace(",", ".");
+      const valueNet = Number(valueRaw);
       return { name, valueNet };
     })
-    .filter(Boolean) as { name: string; valueNet: number | null }[];
+    .filter((it) => it.name.length > 0 && Number.isFinite(it.valueNet));
 
-  // Pełna wymiana listy kosztów w transakcji
+  // Zapis idempotentny: czyścimy stare, wstawiamy nowe (z timestampami)
   await prisma.$transaction(async (tx) => {
     await tx.offerCost.deleteMany({ where: { offerId: id } });
 
-    if (cleaned.length > 0) {
-      const now = new Date();
-      // Uwaga: createMany nie uzupełnia @updatedAt / @default(now())
-      await tx.offerCost.createMany({
-        data: cleaned.map((c) => ({
+    const now = new Date();
+    for (const it of clean) {
+      await tx.offerCost.create({
+        data: {
           offerId: id,
-          name: c.name,
-          valueNet: c.valueNet,
-          createdAt: now,   // <-- wymagane gdy kolumny są NOT NULL
-          updatedAt: now,   // <-- jw.
-        })),
+          name: it.name,
+          valueNet: it.valueNet,
+          createdAt: now,
+          updatedAt: now,
+        },
       });
     }
   });
 
-  // Zwróć posortowane items
-  const items = await prisma.offerCost.findMany({
+  // Zwrot świeżych danych
+  const rows = await prisma.offerCost.findMany({
     where: { offerId: id },
-    orderBy: { id: "asc" },
+    orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json({ items });
+  return NextResponse.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      valueNet: Number(r.valueNet),
+    })),
+  });
 }

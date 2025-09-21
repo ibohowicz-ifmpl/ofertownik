@@ -6,14 +6,12 @@ import { formatMoney, NUMERIC_CLS, toNumber } from "@/lib/format";
 
 type CostItem = { id?: string; name: string; valueNet: number | null };
 
-/** Backend przyjmuje wartości w zł jako string "X.XX" (2 miejsca). */
 function toBackendMoney(value: number | null): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0.00";
   return n.toFixed(2);
 }
 
-/** Luźna normalizacja zwróconych rekordów do { name, valueNet: number|null } */
 function normalizeItems(raw: any): CostItem[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((it: any) => {
@@ -40,17 +38,14 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
   );
   const [valueText, setValueText] = useState<string[]>(
     Array.from({ length: 5 }, () => "")
-  ); // widok inputów (string)
+  );
   const [baseline, setBaseline] = useState<CostItem[]>(
     Array.from({ length: 5 }, () => ({ name: "", valueNet: null }))
   );
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
-  // ✅ TOAST: sukces/błąd
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // fetch istniejących kosztów (z normalizacją typów)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -60,7 +55,6 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
         const data = await r.json(); // { items: any[] }
         const saved = normalizeItems(data?.items);
 
-        // podbij do 5 wierszy
         const padded = saved
           .concat(Array.from({ length: Math.max(0, 5 - saved.length) }, () => ({ name: "", valueNet: null })))
           .slice(0, 5);
@@ -102,7 +96,7 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
         .map((c) => ({
           id: c.id,
           name: (c.name || "").trim(),
-          valueNet: toBackendMoney(c.valueNet), // zawsze "X.XX"
+          valueNet: toBackendMoney(c.valueNet),
         }))
         .filter((c) => c.name.length > 0);
 
@@ -114,9 +108,7 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json(); // { items: [...] }
 
-      // znormalizuj odpowiedź z backendu
       const saved = normalizeItems(data?.items);
-
       const padded = saved
         .concat(Array.from({ length: Math.max(0, 5 - saved.length) }, () => ({ name: "", valueNet: null })))
         .slice(0, 5);
@@ -127,11 +119,9 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
       setMsg("Zapisano koszty");
       setTimeout(() => setMsg(null), 1200);
 
-      // ✅ TOAST: sukces
       setToast({ type: "success", text: "Zapisano koszty" });
       setTimeout(() => setToast(null), 1500);
 
-      // Powiadom inne panele o sumie
       const sumNet = padded.reduce((acc, it) => acc + (Number(it?.valueNet) || 0), 0);
       window.dispatchEvent(new CustomEvent("offer-costs-saved", { detail: { offerId, sumNet } }));
     } catch (e: any) {
@@ -143,19 +133,9 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
     }
   }
 
-  // (opcjonalne) GLOBALNE „ZAPISZ WSZYSTKO” – zostawione jak było
-  useEffect(() => {
-    const handler = () => {
-      if (anyDirty && !saving) void save();
-    };
-    window.addEventListener("offer-save-all", handler as EventListener);
-    return () => window.removeEventListener("offer-save-all", handler as EventListener);
-  }, [anyDirty, saving]); // słuchaj zmian
-
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
-        {/* ✅ TOAST */}
         {toast && (
           <div
             role="status"
@@ -171,8 +151,7 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
         <div className="flex items-center justify-between mb-2">
           <div className="font-semibold">Koszty (max 5)</div>
           <div className="text-sm text-gray-800 font-semibold">
-            Wartość kosztów:{" "}
-            <span className={`font-bold ${NUMERIC_CLS}`}>{formatMoney(sum)}</span>
+            Wartość kosztów: <span className={`font-bold ${NUMERIC_CLS}`}>{formatMoney(sum)}</span>
           </div>
         </div>
 
@@ -226,7 +205,7 @@ export default function CostsPanel({ offerId }: { offerId: string }) {
                   }}
                   onFocus={(e) => {
                     const num = costs[i]?.valueNet;
-                    const raw = num == null ? "" : String(num).replace(".", ","); // snapshot
+                    const raw = num == null ? "" : String(num).replace(".", ",");
                     e.currentTarget.value = raw;
                     setValueText((prev) => {
                       const next = [...prev];

@@ -1,0 +1,29 @@
+ Volume in drive C has no label.
+ Volume Serial Number is 48FA-CA45
+
+ Directory of C:\Projekty\ofertownik\public
+
+21.09.2025  04:07    <DIR>          .
+21.09.2025  03:46    <DIR>          ..
+16.09.2025  14:15               391 file.svg
+16.09.2025  14:15             1ÿ035 globe.svg
+19.09.2025  20:29           409ÿ666 home-bg-poster.jpg
+19.09.2025  19:39        15ÿ101ÿ769 home-bg.mp4
+21.09.2025  04:07                 0 lista.txt
+18.09.2025  09:41             2ÿ551 logo.svg
+16.09.2025  14:15             1ÿ375 next.svg
+18.09.2025  09:58    <DIR>          offers
+16.09.2025  14:15               128 vercel.svg
+16.09.2025  14:15               385 window.svg
+               9 File(s)     15ÿ517ÿ300 bytes
+
+ Directory of C:\Projekty\ofertownik\public\offers
+
+18.09.2025  09:58    <DIR>          .
+21.09.2025  04:07    <DIR>          ..
+18.09.2025  09:41             2ÿ551 logo.svg
+               1 File(s)          2ÿ551 bytes
+
+     Total Files Listed:
+              10 File(s)     15ÿ519ÿ851 bytes
+               5 Dir(s)  83ÿ934ÿ167ÿ040 bytes free
