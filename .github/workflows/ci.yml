@@ -12,20 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Show versions
+      - name: Enable pnpm via Corepack
         run: |
-          node -v
+          corepack enable
+          corepack prepare pnpm@10 --activate
           pnpm -v
-
       - run: pnpm install --frozen-lockfile
       - run: pnpm run -s typecheck
 
@@ -37,7 +32,11 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: corepack enable
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10 --activate
+          pnpm -v
       - run: pnpm install --frozen-lockfile
       - run: pnpm run -s lint
 
@@ -52,6 +51,10 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: corepack enable
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10 --activate
+          pnpm -v
       - run: pnpm install --frozen-lockfile
       - run: pnpm run -s build
