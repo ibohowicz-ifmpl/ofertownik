@@ -2,13 +2,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useCancelStatus, SoftBlock } from "./cancelGuard";
 
 type Props = {
   id: string;
   initialDates?: Record<string, string | null | undefined>;
 };
 
-// Porządek kroków i etykiety
 const STEP_ORDER = [
   "WYSLANIE",
   "AKCEPTACJA_ZLECENIE",
@@ -17,6 +17,7 @@ const STEP_ORDER = [
   "ODBIOR_PRAC",
   "PWF",
 ] as const;
+
 type Step = typeof STEP_ORDER[number];
 
 const STEP_LABEL: Record<Step, string> = {
@@ -28,7 +29,6 @@ const STEP_LABEL: Record<Step, string> = {
   PWF: "Data PWF",
 };
 
-// Normalizacja: "", "YYYY-MM-DD", ISO → "YYYY-MM-DD"
 function normalizeDate(v: any): string {
   if (!v) return "";
   const s = String(v);
@@ -37,7 +37,6 @@ function normalizeDate(v: any): string {
   return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
 }
 
-// Parsowanie odpowiedzi GET /milestones (płasko lub items[])
 function parseMilestones(data: any): Record<string, string> {
   const out: Record<string, string> = {};
   if (Array.isArray(data?.items)) {
@@ -62,7 +61,9 @@ function parseMilestones(data: any): Record<string, string> {
 }
 
 export default function EditDates({ id, initialDates = {} }: Props) {
-  // Stan wejściowy → normalizacja
+  // miękka blokada
+  const { isCancelled } = useCancelStatus(String(id));
+
   const initialNorm = useMemo(() => {
     const r: Record<string, string> = {};
     for (const k of STEP_ORDER) r[k] = normalizeDate(initialDates[k]);
@@ -72,18 +73,20 @@ export default function EditDates({ id, initialDates = {} }: Props) {
   const [dates, setDates] = useState<Record<string, string>>(initialNorm);
   const [saved, setSaved] = useState<Record<string, string>>(initialNorm);
 
-  // Difflist
-  const dirtyKeys = STEP_ORDER.filter((k) => (dates[k] || "") !== (saved[k] || ""));
+  const dirtyKeys = STEP_ORDER.filter(
+    (k) => (dates[k] || "") !== (saved[k] || "")
+  );
   const anyDirty = dirtyKeys.length > 0;
 
-  // Toast
   const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Refetch po montażu i po zapisie (źródło prawdy = backend)
   async function refetch() {
     try {
-      const res = await fetch(`/api/offers/${id}/milestones`, { cache: "no-store" });
+      const bust = `t=${Date.now()}`;
+      const res = await fetch(`/api/offers/${id}/milestones?${bust}`, {
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const data = await res.json();
       const parsed = parseMilestones(data);
@@ -95,7 +98,6 @@ export default function EditDates({ id, initialDates = {} }: Props) {
     refetch();
   }, [id]);
 
-  // Zależności między etapami: każdy kolejny wymaga wcześniejszego
   function minFor(idx: number) {
     const prevKey = STEP_ORDER[idx - 1];
     return idx > 0 && dates[prevKey] ? dates[prevKey] : undefined;
@@ -104,7 +106,6 @@ export default function EditDates({ id, initialDates = {} }: Props) {
     return idx === 0 ? true : Boolean(dates[STEP_ORDER[idx - 1]]);
   }
 
-  // Zapis całego obiektu — wysyłamy płasko + items[] + replace: true
   async function saveDates() {
     try {
       if (!anyDirty || saving) return;
@@ -121,7 +122,6 @@ export default function EditDates({ id, initialDates = {} }: Props) {
       const res = await fetch(`/api/offers/${id}/milestones`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        // Wspieramy oba formaty + jawne "replace"
         body: JSON.stringify({ ...flatPayload, items, replace: true }),
       });
 
@@ -130,9 +130,10 @@ export default function EditDates({ id, initialDates = {} }: Props) {
         throw new Error(t || `HTTP ${res.status}`);
       }
 
-      await refetch(); // synchronizacja -> dirty znika
-      // Powiadom inne panele
-      window.dispatchEvent(new CustomEvent("offer-dates-saved", { detail: { offerId: id } }));
+      await refetch();
+      window.dispatchEvent(
+        new CustomEvent("offer-dates-saved", { detail: { offerId: id } })
+      );
 
       setMsg({ type: "success", text: "Zapisano daty etapów." });
       setTimeout(() => setMsg(null), 1500);
@@ -146,7 +147,6 @@ export default function EditDates({ id, initialDates = {} }: Props) {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
-      {/* Toast */}
       {msg && (
         <div
           role="status"
@@ -159,70 +159,75 @@ export default function EditDates({ id, initialDates = {} }: Props) {
         </div>
       )}
 
-      <div className="font-semibold mb-2">Daty etapów</div>
+      {/* bez lokalnego CancelBanner – sticky jest w page.tsx */}
+      <SoftBlock disabled={isCancelled}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {STEP_ORDER.map((step, idx) => {
+            const dirty = (dates[step] || "") !== (saved[step] || "");
+            const enabled = enabledFor(idx);
+            const min = minFor(idx);
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {STEP_ORDER.map((step, idx) => {
-          const dirty = (dates[step] || "") !== (saved[step] || "");
-          const enabled = enabledFor(idx);
-          const min = minFor(idx);
-
-          return (
-            <label key={step} className="grid gap-1">
-              <span
-                className={`text-sm ${
-                  dirty ? "text-amber-700 font-medium" : "text-gray-700"
-                } ${!enabled ? "opacity-70" : ""}`}
-              >
-                {STEP_LABEL[step as Step]}
-              </span>
-              <input
-                type="date"
-                className={`border rounded px-2 py-1 ${
-                  dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                } ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
-                value={dates[step] || ""}
-                onChange={(e) => setDates((m) => ({ ...m, [step]: e.target.value }))}
-                disabled={!enabled || saving}
-                min={min}
-                title={enabled ? "" : "Najpierw uzupełnij wcześniejsze etapy"}
-              />
-              {/* Guzik czyszczenia pojedynczej daty */}
-              {dates[step] && (
-                <button
-                  type="button"
-                  onClick={() => setDates((m) => ({ ...m, [step]: "" }))}
-                  className="justify-self-start text-xs text-gray-600 hover:text-gray-800 underline"
-                  disabled={saving}
+            return (
+              <label key={step} className="grid gap-1">
+                <span
+                  className={`text-sm ${
+                    dirty ? "text-amber-700 font-medium" : "text-gray-700"
+                  } ${!enabled ? "opacity-70" : ""}`}
                 >
-                  Wyczyść
-                </button>
-              )}
-            </label>
-          );
-        })}
-      </div>
-
-      {/* PRZYCISK ZAPISU DAT — czerwony tylko gdy są NIEZAPISANE zmiany */}
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <div className="text-sm text-gray-600">
-          {anyDirty ? `Niezapisane daty: ${dirtyKeys.length}` : ""}
+                  {STEP_LABEL[step as Step]}
+                </span>
+                <input
+                  type="date"
+                  className={`border rounded px-2 py-1 ${
+                    dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  } ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
+                  value={dates[step] || ""}
+                  onChange={(e) =>
+                    setDates((m) => ({ ...m, [step]: e.target.value }))
+                  }
+                  disabled={!enabled || saving}
+                  min={min}
+                  title={
+                    enabled ? "" : "Najpierw uzupełnij wcześniejsze etapy"
+                  }
+                />
+                {dates[step] && (
+                  <button
+                    type="button"
+                    onClick={() => setDates((m) => ({ ...m, [step]: "" }))}
+                    className="justify-self-start text-xs text-gray-600 hover:text-gray-800 underline"
+                    disabled={saving}
+                  >
+                    Wyczyść
+                  </button>
+                )}
+              </label>
+            );
+          })}
         </div>
-        <button
-          onClick={saveDates}
-          disabled={!anyDirty || saving}
-          aria-busy={saving}
-          className={
-            "rounded px-3 py-1 " +
-            (anyDirty
-              ? "border border-red-500 text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
-              : "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50")
-          }
-          title={anyDirty ? "Zapisz zmienione daty" : "Brak zmian do zapisania"}
-        >
-          {saving ? "Zapisywanie…" : "Zapisz daty"}
-        </button>
-      </div>
+
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <div className="text-sm text-gray-600">
+            {anyDirty ? `Niezapisane daty: ${dirtyKeys.length}` : ""}
+          </div>
+          <button
+            onClick={saveDates}
+            disabled={!anyDirty || saving}
+            aria-busy={saving}
+            className={
+              "rounded px-3 py-1 " +
+              (anyDirty
+                ? "border border-red-500 text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
+                : "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50")
+            }
+            title={
+              anyDirty ? "Zapisz zmienione daty" : "Brak zmian do zapisania"
+            }
+          >
+            {saving ? "Zapisywanie…" : "Zapisz daty"}
+          </button>
+        </div>
+      </SoftBlock>
     </div>
   );
 }

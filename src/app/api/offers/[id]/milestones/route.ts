@@ -1,121 +1,137 @@
-// src/app/api/offers/[id]/milestones/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-type Step =
-  | "WYSLANIE"
-  | "AKCEPTACJA_ZLECENIE"
-  | "WYKONANIE"
-  | "PROTOKOL_WYSLANY"
-  | "ODBIOR_PRAC"
-  | "PWF";
+// Next 15: dynamic params są asynchroniczne
+type RouteParams = { params: Promise<{ id: string }> };
 
-const STEP_ORDER: Step[] = [
+const ORDER = [
   "WYSLANIE",
   "AKCEPTACJA_ZLECENIE",
   "WYKONANIE",
   "PROTOKOL_WYSLANY",
   "ODBIOR_PRAC",
   "PWF",
-];
+] as const;
 
-function normDate(v: any): string | null {
-  if (!v) return null;
-  const s = String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // YYYY-MM-DD
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+function bad(msg: string, code = 400) {
+  return NextResponse.json({ error: msg }, { status: code, headers: { "Cache-Control": "no-store" } });
 }
 
-// GET: zwracamy spójnie items[]
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params; // Next 15: await!
-  const rows = await prisma.offerMilestone.findMany({
+function parseYMD(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00.000Z`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+export async function GET(_req: Request, { params }: RouteParams) {
+  const { id } = await params;
+  if (!id) return bad("Missing id");
+
+  const ms = await prisma.offerMilestone.findMany({
     where: { offerId: id },
     select: { step: true, occurredAt: true },
-    orderBy: [{ occurredAt: "asc" }],
+    orderBy: { occurredAt: "asc" },
   });
 
-  return NextResponse.json({
-    items: rows.map((r) => ({
-      step: r.step,
-      occurredAt: r.occurredAt.toISOString().slice(0, 10),
-    })),
-  });
+  return NextResponse.json(
+    {
+      items: ms.map((m) => ({
+        step: String(m.step),
+        occurredAt: m.occurredAt ? m.occurredAt.toISOString().slice(0, 10) : null,
+      })),
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
-// PUT: przyjmujemy płasko (WYSLANIE: "YYYY-MM-DD" | null, ...) i/lub items[], opcjonalnie replace
-export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params; // Next 15: await!
-  const body = await req.json().catch(() => ({} as any));
+export async function PUT(req: Request, { params }: RouteParams) {
+  const { id } = await params;
+  if (!id) return bad("Missing id");
 
-  const incoming = new Map<Step, string | null>();
+  const body = await req.json().catch(() => ({}));
 
-  // a) items[]
+  // Zbierz stan docelowy z formatu płaskiego i items[]
+  const map: Record<string, string | null> = {};
+  for (const k of ORDER) {
+    if (Object.prototype.hasOwnProperty.call(body, k)) map[k] = body[k];
+  }
   if (Array.isArray(body?.items)) {
-    for (const it of body.items) {
-      const step = (it?.step || it?.name || it?.code) as Step;
-      if (!STEP_ORDER.includes(step)) continue;
-      const when = normDate(
-        it?.occurredAt ?? it?.occurred_at ?? it?.date ?? it?.occurred ?? it?.at
-      );
-      incoming.set(step, when);
+    for (const it of body.items as Array<any>) {
+      const step = String(it?.step || "");
+      const when = it?.occurredAt ?? it?.date ?? it?.at ?? null;
+      if (ORDER.includes(step as any)) map[step] = when;
     }
   }
-  // b) płasko (nadpisuje items[] jeśli oba są)
-  for (const k of STEP_ORDER) {
-    if (k in body) incoming.set(k, normDate(body[k]));
-  }
 
-  if (incoming.size === 0) {
-    return new NextResponse("Brak danych do zapisu", { status: 400 });
-  }
+  // Walidacja ciągłości i monotoniczności (>=)
+  type Err = { step: string; msg: string };
+  const errors: Err[] = [];
+  let prevDate: Date | null = null;
 
-  const replace = Boolean(body?.replace);
+  for (let i = 0; i < ORDER.length; i++) {
+    const step = ORDER[i];
+    const raw = map[step] ?? null;
+    const dt = parseYMD(raw);
 
-  // przygotuj create dla dat niepustych
-  const toCreate = Array.from(incoming.entries())
-    .filter(([_, d]) => d)
-    .map(([step, d]) => ({
-      offerId: id,
-      step, // enum MilestoneStep
-      occurredAt: new Date(String(d) + "T00:00:00.000Z"),
-    }));
-
-  await prisma.$transaction(async (tx) => {
-    if (replace) {
-      // pełne zastąpienie — czyści wszystko dla oferty
-      await tx.offerMilestone.deleteMany({ where: { offerId: id } });
-      if (toCreate.length) await tx.offerMilestone.createMany({ data: toCreate });
-    } else {
-      // częściowa aktualizacja — null ⇒ DELETE; data ⇒ UPSERT
-      for (const [step, val] of incoming.entries()) {
-        if (!val) {
-          await tx.offerMilestone.deleteMany({ where: { offerId: id, step } });
-        } else {
-          const d = new Date(String(val) + "T00:00:00.000Z");
-          await tx.offerMilestone.upsert({
-            // nazwa 1:1 z @@unique(name: "OfferMilestone_offerId_step")
-            where: { OfferMilestone_offerId_step: { offerId: id, step } },
-            create: { offerId: id, step, occurredAt: d },
-            update: { occurredAt: d },
-          });
-        }
+    if (i > 0) {
+      const prevStep = ORDER[i - 1];
+      const prevRaw = map[prevStep] ?? null;
+      const prev = parseYMD(prevRaw);
+      if (dt && !prev) {
+        errors.push({
+          step,
+          msg: `Nie można ustawić „${step}” bez wcześniejszego etapu „${prevStep}”.`,
+        });
       }
     }
-  });
 
-  // zwróć świeże dane
-  const rows = await prisma.offerMilestone.findMany({
+    if (dt && prevDate && dt < prevDate) {
+      errors.push({
+        step,
+        msg: `Data etapu „${step}” nie może być wcześniejsza niż poprzedni etap.`,
+      });
+    }
+
+    if (dt) prevDate = dt;
+  }
+
+  if (errors.length) {
+    return NextResponse.json({ errors }, { status: 422, headers: { "Cache-Control": "no-store" } });
+  }
+
+  // Zbuduj finalną listę rekordów do utworzenia (tylko kroki z datą)
+  const createItems = ORDER
+    .map((step) => {
+      const dt = parseYMD(map[step] ?? null);
+      return dt ? { offerId: id, step: step as any, occurredAt: dt } : null;
+    })
+    .filter(Boolean) as Array<{ offerId: string; step: any; occurredAt: Date }>;
+
+  // **Uproszczenie – ZAWSZE REPLACE**:
+  // 1) usuń wszystkie milestone’y tej oferty
+  // 2) utwórz od zera tylko te, które przyszły
+  await prisma.$transaction([
+    prisma.offerMilestone.deleteMany({ where: { offerId: id } }),
+    ...(createItems.length ? [prisma.offerMilestone.createMany({ data: createItems })] : []),
+  ]);
+
+  // Zwróć świeży stan
+  const ms = await prisma.offerMilestone.findMany({
     where: { offerId: id },
     select: { step: true, occurredAt: true },
-    orderBy: [{ occurredAt: "asc" }],
+    orderBy: { occurredAt: "asc" },
   });
 
-  return NextResponse.json({
-    items: rows.map((r) => ({
-      step: r.step,
-      occurredAt: r.occurredAt.toISOString().slice(0, 10),
-    })),
-  });
+  return NextResponse.json(
+    {
+      mode: "replace", // debug: zawsze replace
+      items: ms.map((m) => ({
+        step: String(m.step),
+        occurredAt: m.occurredAt ? m.occurredAt.toISOString().slice(0, 10) : null,
+      })),
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

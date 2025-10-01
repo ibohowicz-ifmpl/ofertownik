@@ -11,6 +11,7 @@ type SearchParams = {
   dateFrom?: string;
   dateTo?: string;
   dateDir?: "asc" | "desc";
+  cancelled?: string; // "1" => tryb anulowanych
 };
 
 // ---------- Walidacja parametrów ----------
@@ -53,6 +54,9 @@ function withParams(base: string, params: Record<string, string | undefined>) {
   const qs = u.searchParams.toString();
   return qs ? `${base}?${qs}` : base;
 }
+function safeCancelled(v?: string) {
+  return v === "1" || v === "true";
+}
 
 export default async function OffersPage({
   searchParams,
@@ -66,8 +70,9 @@ export default async function OffersPage({
   const selFrom = safeYMD(sp?.dateFrom);
   const selTo = safeYMD(sp?.dateTo);
   const dateDir = safeDateDir(sp?.dateDir);
+  const showCancelled = safeCancelled(sp?.cancelled);
 
-  const tableKey = JSON.stringify({ selectedMonth, dir, selStep, selFrom, selTo, dateDir });
+  const tableKey = JSON.stringify({ selectedMonth, dir, selStep, selFrom, selTo, dateDir, showCancelled });
 
   // DISTINCT miesiące (DESC)
   const monthRows = await prisma.$queryRaw<{ offerMonth: string }[]>`
@@ -80,6 +85,15 @@ export default async function OffersPage({
   // WHERE
   const where: any = {};
   if (selectedMonth) where.offerMonth = selectedMonth;
+
+  // aktywne vs anulowane
+  if (showCancelled) {
+    where.cancelledAt = { not: null };
+  } else {
+    where.cancelledAt = null;
+  }
+
+  // dodatkowe filtrowanie po krokach/datacie (dotyczy obu trybów)
   if (selStep || selFrom || selTo) {
     const stepCond: any = {};
     if (selStep) stepCond.step = selStep;
@@ -94,12 +108,12 @@ export default async function OffersPage({
   const offers = await prisma.offer.findMany({
     where,
     include: { client: true, milestones: true, costs: true as any },
-    orderBy: { offerNo: dir as any },
+    orderBy: showCancelled ? { cancelledAt: "desc" as any } : { offerNo: dir as any },
   } as any);
 
-  // (opcjonalnie) sort po MIN(occurredAt) dla wybranego kroku
+  // (opcjonalnie) sort po MIN(occurredAt) dla wybranego kroku (gdy nie tryb anulowanych)
   let offerMinDate = new Map<string, Date | null>();
-  if (selStep) {
+  if (!showCancelled && selStep) {
     const params: any[] = [selStep];
     let whereSql = `WHERE ("step"::text) = $1`;
     if (selFrom) {
@@ -113,6 +127,10 @@ export default async function OffersPage({
     if (selectedMonth) {
       params.push(selectedMonth);
       whereSql += ` AND "offerId" IN (SELECT "id" FROM "Offer" WHERE "offerMonth" = $${params.length})`;
+    }
+    if (!showCancelled) {
+      // tylko aktywne
+      whereSql += ` AND "offerId" IN (SELECT "id" FROM "Offer" WHERE "cancelledAt" IS NULL)`;
     }
 
     const rows = await prisma.$queryRawUnsafe<{ offerId: string; minAt: Date }[]>(
@@ -143,6 +161,7 @@ export default async function OffersPage({
     contractor: o.contractor ?? null,
     vendorOrderNo: o.vendorOrderNo ?? null,
     valueNet: o.valueNet != null ? Number(o.valueNet) : null,
+    cancelledAt: o.cancelledAt ? new Date(o.cancelledAt).toISOString() : null, // ⬅️ NOWE
     milestones: Array.isArray(o.milestones)
       ? o.milestones.map((m: any) => ({
           step: String(m.step),
@@ -155,11 +174,15 @@ export default async function OffersPage({
   }));
 
   // Linki sortowania
-  const common = { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir };
+  const common = { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined };
   const linkAsc = withParams("/offers", { ...common, dir: "asc" });
   const linkDesc = withParams("/offers", { ...common, dir: "desc" });
   const linkDateAsc = withParams("/offers", { ...common, dir, dateDir: "asc" });
   const linkDateDesc = withParams("/offers", { ...common, dir, dateDir: "desc" });
+
+  // Link przełącznika anulowanych
+  const linkCancelledOn = withParams("/offers", { ...common, cancelled: "1" });
+  const linkCancelledOff = withParams("/offers", { ...common, cancelled: undefined });
 
   // UI stałe
   const ROW1_TOP = 0;
@@ -179,7 +202,7 @@ export default async function OffersPage({
             <h1 className="text-xl font-semibold">Lista ofert</h1>
           </div>
 
-          {/* Filtry + sorty + Dodaj ofertę */}
+          {/* Filtry + sorty + Dodaj + Anulowane */}
           <div className="flex items-center gap-3">
             <form method="GET" action="/offers" className="flex items-center gap-2 flex-wrap">
               {/* Miesiąc */}
@@ -236,9 +259,10 @@ export default async function OffersPage({
                 title="Data do"
               />
 
-              {/* zachowaj bieżące sorty */}
+              {/* zachowaj bieżące sorty i tryb anulowanych */}
               <input type="hidden" name="dir" value={dir} />
               <input type="hidden" name="dateDir" value={dateDir} />
+              {showCancelled && <input type="hidden" name="cancelled" value="1" />}
 
               <button
                 type="submit"
@@ -250,7 +274,7 @@ export default async function OffersPage({
               </button>
               {(selectedMonth || selStep || selFrom || selTo) && (
                 <a
-                  href={withParams("/offers", { dir, dateDir })}
+                  href={withParams("/offers", { dir, dateDir, cancelled: showCancelled ? "1" : undefined })}
                   className="inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px]
                              bg-transparent text-white hover:bg-white/10 transition-colors"
                   title="Wyczyść filtr"
@@ -263,7 +287,7 @@ export default async function OffersPage({
             {/* Sort po numerze */}
             <div className="flex items-center gap-1 ml-2">
               <a
-                href={withParams("/offers", { ...common, dir: "asc" })}
+                href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined, dir: "asc" })}
                 className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
                   dir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
                 }`}
@@ -272,7 +296,7 @@ export default async function OffersPage({
                 A→Z
               </a>
               <a
-                href={withParams("/offers", { ...common, dir: "desc" })}
+                href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined, dir: "desc" })}
                 className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
                   dir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
                 }`}
@@ -282,11 +306,11 @@ export default async function OffersPage({
               </a>
             </div>
 
-            {/* Sort po dacie (po wybraniu kroku) */}
-            {selStep && (
+            {/* Sort po dacie (po wybraniu kroku) — tylko w widoku aktywnych */}
+            {!showCancelled && selStep && (
               <div className="flex items-center gap-1 ml-1">
                 <a
-                  href={withParams("/offers", { ...common, dir, dateDir: "asc" })}
+                  href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dir, cancelled: showCancelled ? "1" : undefined, dateDir: "asc" })}
                   className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
                     dateDir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
                   }`}
@@ -295,7 +319,7 @@ export default async function OffersPage({
                   ▲ data
                 </a>
                 <a
-                  href={withParams("/offers", { ...common, dir, dateDir: "desc" })}
+                  href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dir, cancelled: showCancelled ? "1" : undefined, dateDir: "desc" })}
                   className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
                     dateDir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
                   }`}
@@ -305,6 +329,29 @@ export default async function OffersPage({
                 </a>
               </div>
             )}
+
+            {/* Przełącznik: Pokaż anulowane / Pokaż aktywne */}
+            <div className="flex items-center gap-1 ml-2">
+              {!showCancelled ? (
+                <a
+                  href={linkCancelledOn}
+                  className="inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px]
+                             bg-transparent text-white hover:bg-white/10 transition-colors"
+                  title="Pokaż tylko oferty anulowane"
+                >
+                  Pokaż anulowane
+                </a>
+              ) : (
+                <a
+                  href={linkCancelledOff}
+                  className="inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px]
+                             bg-white text-[#009CA6] hover:bg-[#E6FBFC] transition-colors"
+                  title="Wróć do listy aktywnych"
+                >
+                  Pokaż aktywne
+                </a>
+              )}
+            </div>
 
             {/* Dodaj ofertę */}
             <a
@@ -331,14 +378,20 @@ export default async function OffersPage({
               rowAccent={ROW_ACCENT}
               row1Top={ROW1_TOP}
               row2Top={ROW2_TOP}
+              showCancelled={showCancelled} // ⬅️ NOWE
             />
           </div>
         </div>
       </div>
 
-      {selStep && (
+      {!showCancelled && selStep && (
         <div className="px-4 py-2 text-xs text-gray-600">
           Sort po dacie: <b>{STEP_LABEL[selStep]}</b> ({dateDir === "asc" ? "rosnąco" : "malejąco"}). Brak dat – na końcu.
+        </div>
+      )}
+      {showCancelled && (
+        <div className="px-4 py-2 text-xs text-gray-600">
+          Widok: <b>Oferty anulowane</b>. Sort: <b>Data anulowania</b> (najnowsze na górze).
         </div>
       )}
     </main>

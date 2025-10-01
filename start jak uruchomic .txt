@@ -1,1 +1,6 @@
-npm run dev
+# dev
+pnpm dev   # → http://localhost:3000
+
+# prod-preview
+pnpm build
+pnpm start:preview   # → http://localhost:3001

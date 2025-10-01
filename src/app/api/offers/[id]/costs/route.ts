@@ -1,9 +1,11 @@
+// src/app/api/offers/[id]/costs/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// GET /api/offers/:id/costs -> { items: [{id,name,valueNet}] }
+type CostPayload = { name: string; valueNet: number | null };
+
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params; // Next 15: await!
+  const { id } = await ctx.params;
   const rows = await prisma.offerCost.findMany({
     where: { offerId: id },
     orderBy: { createdAt: "asc" },
@@ -18,42 +20,46 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   });
 }
 
-// PUT /api/offers/:id/costs
-// body: { items: [{ name: string, valueNet: number|string }] }
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params; // Next 15: await!
-  const body = await req.json().catch(() => ({} as any));
-  const items = Array.isArray(body?.items) ? body.items : [];
+  const { id } = await ctx.params;
 
-  // Normalizacja i walidacja
-  const clean = items
-    .map((it: any) => {
-      const name = String(it?.name ?? "").trim();
-      const valueRaw = String(it?.valueNet ?? "0").replace(",", ".");
-      const valueNet = Number(valueRaw);
+  const json = await req.json().catch(() => ({}));
+  const items: CostPayload[] = (Array.isArray(json?.items) ? json.items : [])
+    .map((raw: unknown): CostPayload => {
+      const r = raw as { name?: unknown; valueNet?: unknown };
+      const name = String(r?.name ?? "").trim();
+
+      const v = r?.valueNet;
+      let valueNet: number | null = null;
+
+      if (typeof v === "number") {
+        valueNet = Number.isFinite(v) ? Number(v.toFixed(2)) : null;
+      } else if (typeof v === "string") {
+        const n = Number(v.replace(",", "."));
+        valueNet = Number.isFinite(n) ? Number(n.toFixed(2)) : null;
+      }
+
       return { name, valueNet };
     })
-    .filter((it) => it.name.length > 0 && Number.isFinite(it.valueNet));
+    .filter((it: CostPayload) => it.name.length > 0 && Number.isFinite((it.valueNet as number)));
 
-  // Zapis idempotentny: czyścimy stare, wstawiamy nowe (z timestampami)
+  // Idempotentny zapis listy kosztów
   await prisma.$transaction(async (tx) => {
     await tx.offerCost.deleteMany({ where: { offerId: id } });
 
-    const now = new Date();
-    for (const it of clean) {
-      await tx.offerCost.create({
-        data: {
-          offerId: id,
-          name: it.name,
-          valueNet: it.valueNet,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
+    if (items.length > 0) {
+      const now = new Date();
+      const data = items.map((it) => ({
+        offerId: id,
+        name: it.name,
+        valueNet: it.valueNet ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      }));
+      await tx.offerCost.createMany({ data });
     }
   });
 
-  // Zwrot świeżych danych
   const rows = await prisma.offerCost.findMany({
     where: { offerId: id },
     orderBy: { createdAt: "asc" },

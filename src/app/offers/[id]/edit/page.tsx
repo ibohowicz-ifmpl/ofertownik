@@ -1,10 +1,11 @@
-// src/app/offers/[id]/edit/page.tsx
+// src/app/offers/[id]/edit/page.tsx — kompaktowy wrapper (max do góry + md:gap-4)
 import { prisma } from "@/lib/prisma";
 import EditPanel from "../editPanel";
 import CostsPanel from "../costsPanel";
 import InfoPanel from "../infoPanel";
 import StatusPanel from "../statusPanel";
-import EditDates from "../editDates";
+// import EditDates from "../editDates";
+import StickyBannerClient from "../stickyBannerClient"; // ⬅️ DODANE
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
 
   if (!id) {
     return (
-      <main className="p-6">
+      <main className="px-4 md:px-5 pt-2 md:pt-2 pb-4">
         <div className="rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
           Brak parametru <code>id</code> w adresie. <a className="underline" href="/offers">Wróć do listy</a>.
         </div>
@@ -28,7 +29,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
 
   if (!offer) {
     return (
-      <main className="p-6">
+      <main className="px-4 md:px-5 pt-2 md:pt-2 pb-4">
         <div className="rounded border border-amber-300 bg-amber-50 text-amber-800 p-3 space-y-2">
           <div>
             Nie znaleziono oferty o <b>id</b>: <code>{id}</code>
@@ -63,8 +64,11 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
   };
 
   return (
-    <main className="p-6">
-      <div className="flex gap-6">
+    <main className="px-4 md:px-5 pt-2 md:pt-2 pb-4">
+      {/* ⬇️ JEDEN globalny sticky baner o blokadzie edycji */}
+      <StickyBannerClient offerId={offer.id} />
+
+      <div className="mt-0 md:mt-0 flex gap-4 md:gap-4">
         {/* LEWA POŁOWA */}
         <div className="w-full md:w-1/2">
           <EditPanel
@@ -79,10 +83,11 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
         <div className="hidden md:block w-px bg-gray-200" />
 
         {/* PRAWA POŁOWA */}
-        <div className="w-full md:flex-1 space-y-4">
+        <div className="w-full md:flex-1 space-y-3">
           <CostsPanel offerId={offer.id} />
           <InfoPanel offerId={offer.id} />
           <StatusPanel offerId={offer.id} />
+          {/* <EditDates offerId={offer.id} /> */}
         </div>
       </div>
     </main>
