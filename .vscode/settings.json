@@ -1,9 +1,24 @@
 {
   "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": { "source.fixAll.eslint": "explicit" },
-  "eslint.validate": ["javascript","javascriptreact","typescript","typescriptreact"],
-  "[prisma]": { "editor.defaultFormatter": "Prisma.prisma" },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  // ESLint – włącz flat config (ESLint 9)
+  "eslint.experimental.useFlatConfig": true,
+  // Walidacje – możesz zostawić JS/TS; jeśli projekt jest tylko TS, JS nie przeszkadza
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  // Prisma – formatter rozszerzenia Prisma
+  "[prisma]": {
+    "editor.defaultFormatter": "Prisma.prisma"
+  },
+  // Pliki – porządek końców linii i ostatnia linia
   "files.eol": "\n",
   "files.insertFinalNewline": true,
+  // TypeScript – więcej pamięci dla tsserver
   "typescript.tsserver.maxTsServerMemory": 4096
 }
