@@ -20,7 +20,6 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
           standalone: true
 
       - name: Install deps
@@ -41,7 +40,6 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
           standalone: true
 
       - name: Install deps
@@ -65,7 +63,6 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
           standalone: true
 
       - name: Install deps
