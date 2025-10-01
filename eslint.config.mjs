@@ -6,7 +6,7 @@ export default [
   // Bazowe reguły TS (bez type-checka — szybkie i stabilne)
   ...tseslint.configs.recommended,
 
-  // Ignorowane ścieżki (zamiast .eslintignore w ESLint 9)
+  // Ignorowane ścieżki (zamiast .eslintignore)
   {
     ignores: [
       "node_modules/**",
@@ -27,7 +27,6 @@ export default [
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "off",
-
       "prefer-const": "warn",
       "@typescript-eslint/no-unused-vars": [
         "warn",
@@ -36,7 +35,7 @@ export default [
     }
   },
 
-  // Tymczasowo poluzuj `any` w app/lib/scripts (żeby CI się nie blokował)
+  // Tymczasowo poluzuj `any` w app/lib/scripts (żeby CI i edytor się nie blokowały)
   {
     files: [
       "src/app/**/*.{ts,tsx}",
@@ -48,3 +47,4 @@ export default [
     }
   }
 ];
+// Inne pliki (np. testy, konfiguracje) — pełne TS reguły
