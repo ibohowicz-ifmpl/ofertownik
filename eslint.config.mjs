@@ -1,59 +1,48 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+// eslint.config.mjs — Flat Config dla ESLint 9 + Next 15
 import next from "eslint-config-next";
-import tseslint from "typescript-eslint";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+/**
+ * Zawartość:
+ * - Presety Next.js (core-web-vitals + TS)
+ * - Ignorowane ścieżki (zamiast .eslintignore)
+ * - Wyjątek na `any` w API i skryptach (żeby CI nie blokował się przy importach)
+ * - Łagodne reguły "prefer-const" i "no-unused-vars" (warnings, nie errors)
+ */
+export default [
+  // 1) Podstawowa konfiguracja Next.js (Flat Config)
+  ...next(),
 
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // 2) Globalne ignorowanie plików/katalogów (ESLint 9 – zamiast .eslintignore)
   {
     ignores: [
       "node_modules/**",
       ".next/**",
       "out/**",
       "build/**",
-      "next-env.d.ts",
-    ],
+      "public/**",
+      "backups/**",
+      "prisma/migrations/**",
+      "**/*.d.ts"
+    ]
   },
+
+  // 3) API + scripts: tymczasowo pozwól na `any` (żeby CI nie blokował się)
+  {
+    files: ["scripts/**/*.{ts,tsx}", "src/app/api/**/*/route.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off"
+    }
+  },
+
+  // 4) Ogólne zmiękczenia (warnings zamiast errors)
+  {
+    files: ["**/*.{ts,tsx}"],
+    rules: {
+      "prefer-const": "warn",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+      ]
+    }
+  }
 ];
-
-// 1) API + scripts: pozwól użyć `any` (żeby CI nie blokował się na importach/API)
-eslintConfig.push({
-  files: ["scripts/**/*.{ts,tsx}", "src/app/api/**/*/route.ts"],
-  rules: {
-    "@typescript-eslint/no-explicit-any": "off",
-  },
-});
-
-// 2) Drobne zmiękczenia – nie wywalają CI (warnings zamiast errors)
-eslintConfig.push({
-  files: ["**/*.{ts,tsx}"],
-  rules: {
-    "prefer-const": "warn",
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-    ],
-  },
-});
-
-// Ignoruj generaty/backupy (zamiast .eslintignore w ESLint 9)
-eslintConfig.push({
-  ignores: [
-    "node_modules",
-    ".next",
-    "public",
-    "backups",
-    "prisma/migrations",
-    "**/*.d.ts"
-  ]
-});
-
-export default eslintConfig;
