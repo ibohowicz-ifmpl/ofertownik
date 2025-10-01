@@ -6,8 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint . --ext .ts,.tsx"
+    "start:preview": "next start -p 3001",
+    "lint": "eslint",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
@@ -17,13 +18,13 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^18.2.75",
     "@types/react-dom": "^18.2.25",
-    "eslint": "^9.36.0",
-    "eslint-config-next": "^15",
-    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "prisma": "^6.16.2",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

@@ -17,7 +17,7 @@ export type OfferRow = {
   costs: { valueNet: number | null }[];
 };
 
-type AttentionLevel = "NONE" | "YELLOW" | "RED";
+type AttentionLevel = "NONE" | "YELLOW" | "RED" | "BLUE";
 
 const STEP_LABEL: Record<string, string> = {
   WYSLANIE: "Wysłanie",
@@ -41,13 +41,15 @@ function readAttention(offerId: string): { level: AttentionLevel; note: string }
     const raw = localStorage.getItem(`offer:attention:${offerId}`);
     if (!raw) return { level: "NONE", note: "" };
     const p = JSON.parse(raw);
-    const level: AttentionLevel = p?.level === "YELLOW" || p?.level === "RED" ? p.level : "NONE";
+    const lvl = p?.level as AttentionLevel;
+    const level: AttentionLevel = (lvl === "YELLOW" || lvl === "RED" || lvl === "BLUE") ? lvl : "NONE";
     const note = typeof p?.note === "string" ? p.note : "";
     return { level, note };
   } catch {
     return { level: "NONE", note: "" };
   }
 }
+
 
 function wyslanieOf(o: OfferRow): string | null {
   return (o.milestones ?? []).find((m) => m.step === "WYSLANIE")?.occurredAt ?? null;
@@ -88,7 +90,7 @@ export default function OffersTableClient({
     };
     window.addEventListener("offer-attention-updated", handler as EventListener);
     return () => window.removeEventListener("offer-attention-updated", handler as EventListener);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [idsKey]);
 
   // ===== Tooltip z powodem anulowania (tylko w showCancelled) =====
@@ -124,7 +126,7 @@ export default function OffersTableClient({
     return () => {
       abort = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [showCancelled, idsKey]);
 
   return (
@@ -263,7 +265,14 @@ export default function OffersTableClient({
           // Znacznik uwagi (lewostronny pasek)
           const att = attMap[o.id] || { level: "NONE", note: "" };
           const leftMarker =
-            att.level === "RED" ? "border-l-4 border-red-600" : att.level === "YELLOW" ? "border-l-4 border-yellow-400" : "";
+            att.level === "RED"
+              ? "border-l-4 [border-left-color:#dc2626]"     // red-600
+              : att.level === "YELLOW"
+                ? "border-l-4 [border-left-color:#f59e0b]"     // amber-500
+                : att.level === "BLUE"
+                  ? "border-l-4 [border-left-color:#3b82f6]"     // blue-500
+                  : "";                                           // NONE → brak paska
+
 
           const wyslanie = wyslanieOf(o);
           const anulowano = o.cancelledAt ?? null;
