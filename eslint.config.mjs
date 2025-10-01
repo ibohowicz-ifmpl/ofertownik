@@ -44,4 +44,16 @@ eslintConfig.push({
   },
 });
 
+// Ignoruj generaty/backupy (zamiast .eslintignore w ESLint 9)
+eslintConfig.push({
+  ignores: [
+    "node_modules",
+    ".next",
+    "public",
+    "backups",
+    "prisma/migrations",
+    "**/*.d.ts"
+  ]
+});
+
 export default eslintConfig;
