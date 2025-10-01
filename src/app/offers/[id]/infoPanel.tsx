@@ -23,7 +23,7 @@ function saveLocal(offerId: string, data: { level: AttentionLevel; note: string 
   try {
     localStorage.setItem(`offer:attention:${offerId}`, JSON.stringify(data));
     window.dispatchEvent(new CustomEvent("offer-attention-updated", { detail: { offerId, ...data } }));
-  } catch {}
+  } catch { }
 }
 
 export default function InfoPanel({ offerId }: { offerId: string }) {
@@ -54,7 +54,7 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
       const { level, note } = loadLocal(offerId);
       setAttentionLevel(level);
       setAttentionNote(note);
-    } catch {}
+    } catch { }
 
     return () => { cancel = true; };
   }, [offerId]);
@@ -100,9 +100,8 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${
-            toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
-          }`}
+          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+            }`}
         >
           {toast.text}
         </div>
@@ -110,7 +109,7 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
 
       <SoftBlock disabled={isCancelled}>
         <div className="rounded-md border border-gray-200 p-2">
-          <div className="font-semibold mb-1">Uwaga (POC lokalny)</div>
+          <div className="font-semibold mb-1">Flagi lokalne</div>
           <div className="flex items-center gap-2 flex-wrap">
             <button type="button" onClick={() => updateAttention("NONE")}
               className={`rounded px-2 py-1 border text-[12px] ${attentionLevel === "NONE" ? "border-gray-400 bg-gray-50 text-gray-700" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}>
