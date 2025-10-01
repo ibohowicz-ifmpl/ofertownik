@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "next build",
     "dev": "next dev -p 3000",
-    "start": "next start -p 3000"
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
@@ -21,15 +21,15 @@
     "@types/node": "^20",
     "@types/react": "^18.2.75",
     "@types/react-dom": "^18.2.25",
-    "eslint": "^9",
+    "eslint": "^9.36.0",
     "eslint-config-next": "^15",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
     "prisma": "^6.16.2",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
-    "typescript-eslint": "^8"
+    "typescript-eslint": "^8.45.0"
   },
   "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a"
 }

@@ -20,7 +20,7 @@ export default [
     ],
   },
 
-  // Ogólne reguły + react-hooks (exhaustive-deps wyłączamy na razie)
+  // Ogólne reguły + react-hooks (exhaustive-deps wyłączone na razie)
   {
     files: ["**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
@@ -36,7 +36,7 @@ export default [
     }
   },
 
-  // Tymczasowo poluzuj any w app/lib/scripts (żeby CI nie blokował się)
+  // Tymczasowo poluzuj `any` w app/lib/scripts (żeby CI się nie blokował)
   {
     files: [
       "src/app/**/*.{ts,tsx}",
