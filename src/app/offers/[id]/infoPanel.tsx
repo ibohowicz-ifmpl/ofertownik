@@ -4,14 +4,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useCancelStatus, SoftBlock } from "./cancelGuard";
 
-type AttentionLevel = "NONE" | "YELLOW" | "RED";
+type AttentionLevel = "NONE" | "YELLOW" | "RED" | "BLUE";
 
 function loadLocal(offerId: string): { level: AttentionLevel; note: string } {
   try {
     const raw = localStorage.getItem(`offer:attention:${offerId}`);
     if (!raw) return { level: "NONE", note: "" };
     const p = JSON.parse(raw);
-    const level: AttentionLevel = p?.level === "YELLOW" || p?.level === "RED" ? p.level : "NONE";
+    const lv = p?.level as AttentionLevel;
+    const level: AttentionLevel =
+      lv === "YELLOW" || lv === "RED" || lv === "BLUE" ? lv : "NONE";
     const note = typeof p?.note === "string" ? p.note : "";
     return { level, note };
   } catch {
@@ -84,14 +86,14 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
 
   function updateAttention(level: AttentionLevel) {
     setAttentionLevel(level);
-    const next = { level, note: attentionNote };
-    saveLocal(offerId, next);
+    const nextNote = level === "NONE" ? "" : attentionNote;
+    if (level === "NONE") setAttentionNote("");
+    saveLocal(offerId, { level, note: nextNote });
   }
 
-  function updateAttentionNote(v: string) {
-    setAttentionNote(v);
-    const next = { level: attentionLevel, note: v };
-    saveLocal(offerId, next);
+  function updateAttentionNote(value: string) {
+    setAttentionNote(value);
+    saveLocal(offerId, { level: attentionLevel, note: value });
   }
 
   return (
@@ -109,7 +111,7 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
 
       <SoftBlock disabled={isCancelled}>
         <div className="rounded-md border border-gray-200 p-2">
-          <div className="font-semibold mb-1">Flagi lokalne</div>
+          <h3 className="text-sm font-medium">Flagi lokalne</h3>
           <div className="flex items-center gap-2 flex-wrap">
             <button type="button" onClick={() => updateAttention("NONE")}
               className={`rounded px-2 py-1 border text-[12px] ${attentionLevel === "NONE" ? "border-gray-400 bg-gray-50 text-gray-700" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}>
@@ -122,6 +124,16 @@ export default function InfoPanel({ offerId }: { offerId: string }) {
             <button type="button" onClick={() => updateAttention("RED")}
               className={`rounded px-2 py-1 border text-[12px] ${attentionLevel === "RED" ? "border-red-500 bg-red-50 text-red-700" : "border-gray-300 bg-white text-gray-700 hover:bg-red-50"}`}>
               Czerwony
+            </button>
+            <button
+              type="button"
+              onClick={() => updateAttention("BLUE")}
+              className={`rounded px-2 py-1 border text-[12px] ${attentionLevel === "BLUE"
+                  ? "border-blue-500 bg-blue-50 text-blue-700"
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-blue-50"
+                }`}
+            >
+              Niebieski
             </button>
             <div className="ml-auto flex items-center gap-2">
               <span className="text-[12px] text-gray-700">Krótka notatka (lokalna)</span>
