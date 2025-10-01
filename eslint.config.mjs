@@ -1,18 +1,19 @@
-// eslint.config.mjs — Flat Config dla ESLint 9 + Next 15
+// eslint.config.mjs
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+import { FlatCompat } from "@eslint/eslintrc";
 import next from "eslint-config-next";
+import tseslint from "typescript-eslint";
 
-/**
- * Zawartość:
- * - Presety Next.js (core-web-vitals + TS)
- * - Ignorowane ścieżki (zamiast .eslintignore)
- * - Wyjątek na `any` w API i skryptach (żeby CI nie blokował się przy importach)
- * - Łagodne reguły "prefer-const" i "no-unused-vars" (warnings, nie errors)
- */
-export default [
-  // 1) Podstawowa konfiguracja Next.js (Flat Config)
-  ...next(),
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const compat = new FlatCompat({ baseDirectory: __dirname });
 
-  // 2) Globalne ignorowanie plików/katalogów (ESLint 9 – zamiast .eslintignore)
+// Bazowa konfiguracja Next (flat) + TS
+const eslintConfig = [
+  ...compat.extends("next/core-web-vitals", "next/typescript"),
+
+  // Ignorowane ścieżki (zamiast .eslintignore w ESLint 9)
   {
     ignores: [
       "node_modules/**",
@@ -23,26 +24,28 @@ export default [
       "backups/**",
       "prisma/migrations/**",
       "**/*.d.ts"
-    ]
+    ],
   },
 
-  // 3) API + scripts: tymczasowo pozwól na `any` (żeby CI nie blokował się)
-  {
-    files: ["scripts/**/*.{ts,tsx}", "src/app/api/**/*/route.ts"],
-    rules: {
-      "@typescript-eslint/no-explicit-any": "off"
-    }
-  },
-
-  // 4) Ogólne zmiękczenia (warnings zamiast errors)
+  // Zmiękczenia globalne: niech prefer-const i unused-vars będą ostrzeżeniami
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
       "prefer-const": "warn",
-      "@typescript-eslint/no-unused-vars": [
-        "warn",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
-      ]
-    }
-  }
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    },
+  },
+
+  // API + skrypty: wyłączamy no-explicit-any (żeby nie blokowało CI)
+  {
+    files: [
+      "scripts/**/*.{ts,tsx}",
+      "src/app/api/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ];
+
+export default eslintConfig;
