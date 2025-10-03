@@ -4,103 +4,266 @@ generator client {
 
 datasource db {
   provider          = "postgresql"
-  url               = env("DATABASE_URL")
-  directUrl         = env("DIRECT_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  url               = env("DATABASE_URL")         // pooled (z pgbouncer=true)
+  directUrl         = env("DIRECT_URL")           // BEZ poolera
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")  // BEZ poolera
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  firstName    String
+  lastName     String
+  initials     String    @unique
+  phone        String?
+  position     String?
+  defaultMpkId String?
+  globalRole   GlobalRole?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  offers       Offer[]   @relation("OfferAuthor")
+}
+
+enum GlobalRole {
+  FINANCE
+  EXEC
+  ADMIN
+}
+
+model MPK {
+  id      String   @id @default(uuid())
+  code3   String   @unique @db.Char(3)
+  name    String
+  street  String?
+  postcode String?
+  city    String?
+  active  Boolean  @default(true)
+
+  offers  Offer[]
+  users   UserMPK[]
+  clients ClientMPK[]
+}
+
+model UserMPK {
+  userId String
+  mpkId  String
+  role   UserMPKRole
+
+  user   User   @relation(fields: [userId], references: [id])
+  mpk    MPK    @relation(fields: [mpkId], references: [id])
+
+  @@id([userId, mpkId])
+  @@unique([userId, mpkId])
+}
+
+enum UserMPKRole {
+  LEADER
+  MANAGER
+  PM
+  VIEWER
 }
 
 model Client {
-  id           String   @id @default(cuid())
-  name         String   @db.VarChar(10)
-  nip          String?  @db.VarChar(15)
-  contactName  String?
-  contactEmail String?
-  contactPhone String?
-  createdAt    DateTime @default(now())
-  offers       Offer[]
+  id        String   @id @default(uuid())
+  nip       String   @unique
+  name      String
+  street    String?
+  postcode  String?
+  city      String?
+  isActive  Boolean  @default(true)
+  notes     String?
+  meta      Json?
+
+  contacts  ClientContact[]
+  offers    Offer[]
+  mpks      ClientMPK[]
+}
+
+model ClientMPK {
+  clientId     String
+  mpkId        String
+  billingNotes String?
+
+  client       Client @relation(fields: [clientId], references: [id])
+  mpk          MPK    @relation(fields: [mpkId], references: [id])
+
+  @@id([clientId, mpkId])
+  @@unique([clientId, mpkId])
+}
+
+model ClientContact {
+  id          String   @id @default(uuid())
+  clientId    String
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  roleTitle   String?
+  isActive    Boolean  @default(true)
+  meta        Json?
+
+  client      Client   @relation(fields: [clientId], references: [id])
+  offers      Offer[]  @relation("OfferClientContact")
 }
 
 model Offer {
-  id             String           @id @default(cuid())
-  clientId       String
-  offerNo        String?
-  vendorOrderNo  String?
-  invoiceNo      String?
-  currency       String           @default("PLN")
-  valueNet       Decimal?         @db.Decimal(18, 2)
-  notes          String?
-  wartoscKosztow Decimal?         @db.Decimal(18, 2)
-  zysk           Decimal?         @db.Decimal(18, 2)
-  marza          Decimal?         @db.Decimal(6, 2)
-  createdAt      DateTime         @default(now())
-  title          String?
-  authorInitials String?
-  contractor     String?
-  note           String?
-  offerMonth     String?          @db.VarChar(7)
-  Document       Document[]
-  client         Client           @relation(fields: [clientId], references: [id])
-  costs          OfferCost[]
-  milestones     OfferMilestone[]
-  cancelledAt    DateTime?
-  cancelReason   String?
+  id              String    @id @default(uuid())
+  offerNo         String?   @unique
+  mpkId           String
+  clientId        String
+  clientContactId String?
+  title           String
+  valueNet        Decimal?
+  currency        String    @default("PLN")
+  authorUserId    String
+  status          OfferStatus @default(DRAFT)
+  createdAt       DateTime  @default(now())
+  finalizedAt     DateTime?
+  meta            Json?
+  costsSumNet     Decimal   @default(0)
 
-  @@index([offerMonth])
-  @@index([invoiceNo])
+  mpk             MPK       @relation(fields: [mpkId], references: [id])
+  client          Client    @relation(fields: [clientId], references: [id])
+  clientContact   ClientContact? @relation("OfferClientContact", fields: [clientContactId], references: [id])
+  author          User      @relation("OfferAuthor", fields: [authorUserId], references: [id])
+
+  items           OfferItem[]
+  terms           OfferTerms?
+  milestones      OfferMilestone[]
+  documents       OfferDocument[]
+  costs           OfferCost[]
+
+  @@index([mpkId])
+  @@index([clientId])
+  @@index([createdAt(sort: Desc)])
+  @@index([finalizedAt(sort: Desc)])
   @@index([offerNo])
 }
 
-model OfferCost {
-  id        String   @id @default(cuid())
-  offerId   String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime
-  valueNet  Decimal  @db.Decimal(14, 2)
-  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+enum OfferStatus {
+  DRAFT
+  FINAL
+  SENT
+  EXECUTED
+  CLOSED
+}
 
-  @@index([offerId])
+model OfferItem {
+  id            String   @id @default(uuid())
+  offerId       String
+  lp            Int
+  name          String
+  qty           Decimal  @default(1)
+  unit          String?
+  priceSuggested Decimal?
+  totalSuggested Decimal?
+  priceOnOffer   Decimal?
+  totalOnOffer   Decimal?
+  showOnOffer    Boolean  @default(true)
+  meta           Json?
+
+  offer         Offer    @relation(fields: [offerId], references: [id])
+}
+
+model OfferTerms {
+  id           String   @id @default(uuid())
+  offerId      String   @unique
+  validityDays Int?
+  deliveryDesc String?
+  vatRate      Decimal?
+  meta         Json?
+
+  offer        Offer    @relation(fields: [offerId], references: [id])
 }
 
 model OfferMilestone {
-  id         String        @id @default(cuid())
-  offerId    String
-  step       MilestoneStep
+  id        String   @id @default(uuid())
+  offerId   String
+  step      OfferMilestoneStep
   occurredAt DateTime
-  offer      Offer         @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
-  @@unique([offerId, step], name: "OfferMilestone_offerId_step")
-  @@index([offerId, occurredAt])
+  offer     Offer    @relation(fields: [offerId], references: [id])
+
+  @@unique([offerId, step])
 }
 
-model AuditLog {
-  id       String   @id
-  actor    String?
-  entity   String
-  entityId String
-  action   String
-  before   Json?
-  after    Json?
-  at       DateTime @default(now())
-}
-
-model Document {
-  id          String    @id
-  offerId     String?
-  docType     String
-  status      String
-  fileKey     String?
-  checksum    String?
-  submittedAt DateTime?
-  Offer       Offer?    @relation(fields: [offerId], references: [id], onDelete: Cascade)
-}
-
-enum MilestoneStep {
-  ZAPYTANIE
+enum OfferMilestoneStep {
   WYSLANIE
-  AKCEPTACJA_ZLECENIE
+  AKCEPTACJA
   WYKONANIE
   PROTOKOL_WYSLANY
   ODBIOR_PRAC
   PWF
+}
+
+model OfferDocument {
+  id         String   @id @default(uuid())
+  offerId    String
+  type       OfferDocumentType
+  status     OfferDocumentStatus
+  version    Int
+  fileKey    String
+  fileName   String
+  mime       String?
+  sizeBytes  Int?
+  sha256     String
+  generatedAt DateTime
+  sentAt     DateTime?
+  metadata   Json?
+
+  offer      Offer    @relation(fields: [offerId], references: [id])
+
+  @@index([offerId, type, version(sort: Desc)])
+}
+
+enum OfferDocumentType {
+  OFFER
+  PROTOKOL
+  PWF
+}
+
+enum OfferDocumentStatus {
+  DRAFT
+  FINAL
+  SENT
+}
+
+model OfferNoSequence {
+  mpkId     String
+  yyyymmdd  String  @db.Char(8)
+  initials  String  @db.Char(4)
+  lastNo    Int
+
+  mpk       MPK     @relation(fields: [mpkId], references: [id])
+
+  @@id([mpkId, yyyymmdd, initials])
+}
+
+model OfferCost {
+  id         String   @id @default(uuid())
+  offerId    String
+  postedAt   DateTime
+  category   String?
+  vendor     String?
+  invoiceNo  String?
+  amountNet  Decimal  // NOT NULL
+  meta       Json?
+
+  offer      Offer    @relation(fields: [offerId], references: [id])
+
+  @@index([offerId, postedAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  offerId   String?
+  action    String
+  at        DateTime
+  meta      Json?
+
+  user      User     @relation(fields: [userId], references: [id])
+  offer     Offer?   @relation(fields: [offerId], references: [id])
 }
