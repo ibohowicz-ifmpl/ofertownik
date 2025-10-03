@@ -1,75 +1,127 @@
 // src/app/api/offers/[id]/costs/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getParamId } from '@/lib/api-helpers';
 
-type CostPayload = { name: string; valueNet: number | null };
+type AnyItem = Record<string, any>;
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
+function parseItems(raw: any): AnyItem[] {
+  if (!raw) return [];
+  // możliwe kontenery
+  const candidates = Array.isArray(raw?.items) ? raw.items
+    : Array.isArray(raw?.costs) ? raw.costs
+      : Array.isArray(raw?.data) ? raw.data
+        : Array.isArray(raw) ? raw
+          : [raw];
+  return candidates.filter(Boolean);
+}
+
+function mapToOfferCost(id: string, r: AnyItem) {
+  // aliasy pól
+  const posted = r.postedAt ?? r.date ?? r.createdAt;
+  const amount = r.amountNet ?? r.valueNet ?? r.kwota ?? r.amount;
+  const vendor = r.vendor ?? r.supplier ?? r.kontrahent ?? r.name ?? '';
+  const invoice = r.invoiceNo ?? r.nrFv ?? r.docNo ?? r.numer ?? '';
+  const category = r.category ?? r.kategoria ?? 'INNE';
+
+  return {
+    offerId: id,
+    postedAt: posted ? new Date(posted) : new Date(),
+    category: String(category),
+    vendor: String(vendor),
+    invoiceNo: String(invoice),
+    amountNet: Number(amount ?? 0),
+  };
+}
+
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  const id = await getParamId(ctx);
   const rows = await prisma.offerCost.findMany({
     where: { offerId: id },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ postedAt: "asc" }, { id: "asc" }],
+    select: { id: true, vendor: true, amountNet: true },
   });
-
   return NextResponse.json({
-    items: rows.map((r) => ({
+    items: rows.map(r => ({
       id: r.id,
-      name: r.name,
-      valueNet: Number(r.valueNet),
+      name: r.vendor ?? '',
+      valueNet: Number(r.amountNet ?? 0),
     })),
   });
 }
 
-export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+async function upsertCosts(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
   const { id } = await ctx.params;
+  let json: any = {};
+  try { json = await req.json(); } catch { }
 
-  const json = await req.json().catch(() => ({}));
-  const items: CostPayload[] = (Array.isArray(json?.items) ? json.items : [])
-    .map((raw: unknown): CostPayload => {
-      const r = raw as { name?: unknown; valueNet?: unknown };
-      const name = String(r?.name ?? "").trim();
+  const simpleItems = Array.isArray(json?.items) && json.items.every(
+    (it: any) => typeof it?.name === 'string' && ('valueNet' in it)
+  );
+  const replace = json?.replace === true;
 
-      const v = r?.valueNet;
-      let valueNet: number | null = null;
+  if (replace && simpleItems) {
+    // wyczyść stare koszty oferty
+    await prisma.offerCost.deleteMany({ where: { offerId: id } });
 
-      if (typeof v === "number") {
-        valueNet = Number.isFinite(v) ? Number(v.toFixed(2)) : null;
-      } else if (typeof v === "string") {
-        const n = Number(v.replace(",", "."));
-        valueNet = Number.isFinite(n) ? Number(n.toFixed(2)) : null;
-      }
+    // zbuduj nowe rekordy
+    const data = (json.items as any[]).map((c) => ({
+      offerId: id,
+      postedAt: new Date(),
+      category: 'INNE',
+      vendor: String(c.name ?? ''),
+      invoiceNo: '',
+      amountNet: Number(c.valueNet ?? 0),
+    })).filter(d => d.vendor.length > 0 && Number.isFinite(d.amountNet));
 
-      return { name, valueNet };
-    })
-    .filter((it: CostPayload) => it.name.length > 0 && Number.isFinite((it.valueNet as number)));
-
-  // Idempotentny zapis listy kosztów
-  await prisma.$transaction(async (tx) => {
-    await tx.offerCost.deleteMany({ where: { offerId: id } });
-
-    if (items.length > 0) {
-      const now = new Date();
-      const data = items.map((it) => ({
-        offerId: id,
-        name: it.name,
-        valueNet: it.valueNet ?? 0,
-        createdAt: now,
-        updatedAt: now,
-      }));
-      await tx.offerCost.createMany({ data });
+    if (data.length > 0) {
+      await prisma.offerCost.createMany({ data, skipDuplicates: true });
     }
-  });
 
-  const rows = await prisma.offerCost.findMany({
-    where: { offerId: id },
-    orderBy: { createdAt: "asc" },
-  });
+    // odczyt po zapisie i zwrotka w prostym formacie
+    const rows = await prisma.offerCost.findMany({
+      where: { offerId: id },
+      orderBy: [{ postedAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, vendor: true, amountNet: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      items: rows.map(r => ({ id: r.id, name: r.vendor ?? '', valueNet: Number(r.amountNet ?? 0) })),
+    });
+  }
 
-  return NextResponse.json({
-    items: rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      valueNet: Number(r.valueNet),
-    })),
-  });
+  // ...w przeciwnym razie zostaw istniejący elastyczny parser i return jak dotychczas...
+  const arr = parseItems(json);
+  const data = arr.map((r) => mapToOfferCost(id, r))
+    .filter((x) => Number.isFinite(x.amountNet));
+
+  if (data.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      inserted: 0,
+      hint: 'Brak rozpoznanych pozycji. Oczekiwane pola: postedAt/date, amountNet/valueNet/amount, vendor/name, invoiceNo/nrFv, category.'
+    });
+  }
+  await prisma.offerCost.createMany({ data, skipDuplicates: true });
+  return NextResponse.json({ ok: true, inserted: data.length });
+}
+
+export async function POST(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  return upsertCosts(req, ctx);
+}
+
+export async function PUT(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  return upsertCosts(req, ctx);
 }

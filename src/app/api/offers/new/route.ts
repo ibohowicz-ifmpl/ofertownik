@@ -1,52 +1,82 @@
-ï»¿// src/app/api/offers/new/route.ts
-import { prisma } from "@/lib/prisma";
+// src/app/api/offers/new/route.ts
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+type Body = {
+  clientId?: string;
+  clientName?: string;
+  clientNip?: string;
+  mpkId?: string | null;
+  title?: string;
+  valueNet?: number | string | null;
+  currency?: string | null;
+  contractor?: string | null; // trzymamy w meta
+  offerNo?: string | null;    // rzadko, zwykle finalizacja nada numer
+};
+
+function safeStr(v: unknown): string {
+  return (typeof v === 'string' ? v : '').trim();
+}
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
+  try {
+    const body = (await req.json()) as Body;
 
-  const offerNo = (body?.offerNo ?? "")?.toString().trim() || null;
-  const title = (body?.title ?? "")?.toString().trim() || null;
-  const authorInitials = (body?.authorInitials ?? "")?.toString().trim() || null;
-  const contractor = (body?.contractor ?? "")?.toString().trim() || null;
-  const valueNetRaw = body?.valueNet;
-  const clientId = body?.clientId ? String(body.clientId) : null;
-  const clientName = body?.clientName ? String(body.clientName).trim() : null;
+    const title = safeStr(body.title);
+    if (!title) {
+      return NextResponse.json({ ok: false, error: 'Brak tytu³u oferty' }, { status: 400 });
+    }
 
-  if (!clientId && !clientName) {
-    return new Response("clientId lub clientName wymagane", { status: 400 });
-  }
+    // 1) Ustalenie klienta (wymagane: id albo name; NIP wymagany przy tworzeniu)
+    let clientId = safeStr(body.clientId);
+    if (!clientId) {
+      const clientName = safeStr(body.clientName);
+      if (!clientName) {
+        return NextResponse.json({ ok: false, error: 'Brak klienta (clientId lub clientName)' }, { status: 400 });
+      }
+      const clientNip = safeStr(body.clientNip) || `0000000000-${Date.now()}`; // minimalny wymagany NIP
+      const client = await prisma.client.upsert({
+        where: { nip: clientNip },
+        update: { name: clientName, isActive: true },
+        create: { nip: clientNip, name: clientName, isActive: true },
+        select: { id: true },
+      });
+      clientId = client.id;
+    }
 
-  // przygotuj klienta
-  let client = null as null | { id: string };
-  if (clientId) {
-    client = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true } });
-    if (!client) return new Response("Nie znaleziono klienta", { status: 400 });
-  } else if (clientName) {
-    const safeClientName = clientName.slice(0, 10); // twardy limit 10
-    client =
-      (await prisma.client.findFirst({ where: { name: safeClientName }, select: { id: true } })) ??
-      (await prisma.client.create({ data: { name: safeClientName }, select: { id: true } }));
-  }
+    // 2) Autor (na DEV: pierwszy aktywny; w produkcji – z sesji)
+    const author = await prisma.user.findFirst({ where: { isActive: true }, select: { id: true } });
+    if (!author) {
+      return NextResponse.json({ ok: false, error: 'Brak aktywnego u¿ytkownika do przypisania jako autor' }, { status: 500 });
+    }
 
-  const valueNet =
-    valueNetRaw === null || valueNetRaw === undefined || valueNetRaw === ""
-      ? null
-      : Number(valueNetRaw);
-  if (valueNet !== null && !Number.isFinite(valueNet)) {
-    return new Response("NieprawidÅ‚owa wartoÅ›Ä‡ netto", { status: 400 });
-  }
+    // 3) Dane oferty
+    const mpkId = body.mpkId ? String(body.mpkId) : undefined;
+    const valueNet = Number(body.valueNet ?? 0);
+    const currency = safeStr(body.currency) || 'PLN';
+    const contractor = safeStr(body.contractor);
+    const offerNo = safeStr(body.offerNo); // zwykle pusty – numer nada finalizacja
 
-  const created = await prisma.offer.create({
-    data: {
-      clientId: client!.id,
-      offerNo,
+    const data: any = {
+      clientId,
+      authorUserId: author.id,
       title,
-      authorInitials,
-      contractor,
-      valueNet: valueNet === null ? undefined : valueNet,
-    },
-    select: { id: true },
-  });
+      status: 'DRAFT', // enum, ale string wystarczy
+      valueNet,
+      currency,
+    };
+    if (mpkId) data.mpkId = mpkId;
+    if (contractor) data.meta = { contractor };
+    if (offerNo) data.offerNo = offerNo;
 
-  return Response.json({ id: created.id });
+    const created = await prisma.offer.create({
+      data,
+      select: { id: true, offerNo: true },
+    });
+
+    return NextResponse.json({ ok: true, id: created.id, offerNo: created.offerNo ?? null });
+  } catch (e: any) {
+    console.error('offers/new error:', e);
+    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+  }
 }

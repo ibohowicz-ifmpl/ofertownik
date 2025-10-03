@@ -27,7 +27,6 @@ type EditPanelProps = {
     wartoscKosztow?: string;
   };
   initialDates: Record<string, string>;
-  initialClient: { id: string; name: string };
 };
 
 function formatPL2(text: string): string {
@@ -51,8 +50,8 @@ function toDatesRecordLoose(data: any): Record<string, string> {
   const arr = Array.isArray(data?.items)
     ? data.items
     : Array.isArray(data?.milestones)
-    ? data.milestones
-    : null;
+      ? data.milestones
+      : null;
 
   if (arr) {
     const out: Record<string, string> = {};
@@ -81,7 +80,6 @@ export default function EditPanel({
   id,
   initialFields,
   initialDates,
-  initialClient,
 }: EditPanelProps) {
   // status anulowania
   const { isCancelled } = useCancelStatus(String(id));
@@ -138,7 +136,7 @@ export default function EditPanel({
       const items = Array.isArray(data?.items) ? data.items : [];
       const sum = items.reduce((acc: number, it: any) => acc + (Number(it?.valueNet) || 0), 0);
       setCostsSum(sum);
-    } catch {}
+    } catch { }
   }
 
   async function refreshDatesFromApi() {
@@ -150,7 +148,7 @@ export default function EditPanel({
       const rec = toDatesRecordLoose(data);
       setDates(rec);
       setSavedDates(rec);
-    } catch {}
+    } catch { }
   }
 
   useEffect(() => {
@@ -184,8 +182,8 @@ export default function EditPanel({
       ? margin < 5
         ? "text-red-600"
         : margin < 14
-        ? "text-orange-500"
-        : "text-gray-900"
+          ? "text-orange-500"
+          : "text-gray-900"
       : "text-gray-900";
 
   // ======= Zapisy / komunikaty =======
@@ -293,9 +291,8 @@ export default function EditPanel({
           <div
             role="status"
             aria-live="polite"
-            className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-[13px] shadow ${
-              saveMsg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
-            }`}
+            className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-[13px] shadow ${saveMsg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+              }`}
           >
             {saveMsg.text}
           </div>
@@ -330,9 +327,8 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Autor (inicjały)</span>
               <input
-                className={`border rounded px-2 py-1 ${
-                  editMode && fields.authorInitials !== fieldsBaseline.authorInitials ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                }`}
+                className={`border rounded px-2 py-1 ${editMode && fields.authorInitials !== fieldsBaseline.authorInitials ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  }`}
                 value={fields.authorInitials}
                 onChange={(e) => setFields((s) => ({ ...s, authorInitials: e.target.value }))}
                 disabled={!editMode}
@@ -342,9 +338,8 @@ export default function EditPanel({
             <label className="md:col-span-2 grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Tytuł</span>
               <input
-                className={`border rounded px-2 py-1 text-blue-700 ${
-                  editMode && fields.title !== fieldsBaseline.title ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                }`}
+                className={`border rounded px-2 py-1 text-blue-700 ${editMode && fields.title !== fieldsBaseline.title ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  }`}
                 value={fields.title}
                 onChange={(e) => setFields((s) => ({ ...s, title: e.target.value }))}
                 disabled={!editMode}
@@ -354,9 +349,8 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Wykonawca</span>
               <input
-                className={`border rounded px-2 py-1 ${
-                  editMode && fields.contractor !== fieldsBaseline.contractor ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                }`}
+                className={`border rounded px-2 py-1 ${editMode && fields.contractor !== fieldsBaseline.contractor ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  }`}
                 value={fields.contractor}
                 onChange={(e) => setFields((s) => ({ ...s, contractor: e.target.value }))}
                 disabled={!editMode}
@@ -366,9 +360,8 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Wartość netto</span>
               <input
-                className={`border rounded px-2 py-1 text-right ${NUMERIC_CLS} ${
-                  editMode && (fields.valueNet || "") !== (fieldsBaseline.valueNet || "") ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                }`}
+                className={`border rounded px-2 py-1 text-right ${NUMERIC_CLS} ${editMode && (fields.valueNet || "") !== (fieldsBaseline.valueNet || "") ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  }`}
                 inputMode="decimal"
                 value={fields.valueNet}
                 onBlur={(e) => {
@@ -388,9 +381,8 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Numer zlecenia</span>
               <input
-                className={`border rounded px-2 py-1 ${
-                  editMode && fields.vendorOrderNo !== fieldsBaseline.vendorOrderNo ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                }`}
+                className={`border rounded px-2 py-1 ${editMode && fields.vendorOrderNo !== fieldsBaseline.vendorOrderNo ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                  }`}
                 value={fields.vendorOrderNo}
                 onChange={(e) => setFields((s) => ({ ...s, vendorOrderNo: e.target.value }))}
                 disabled={!editMode}
@@ -419,8 +411,8 @@ export default function EditPanel({
                 !editMode
                   ? "Włącz edycję, aby zapisać"
                   : fieldsDirty
-                  ? "Zapisz zmiany pól"
-                  : "Brak zmian do zapisania"
+                    ? "Zapisz zmiany pól"
+                    : "Brak zmian do zapisania"
               }
             >
               Zapisz dane
@@ -458,14 +450,14 @@ export default function EditPanel({
                 step === "WYSLANIE"
                   ? "Data wysłania"
                   : step === "AKCEPTACJA_ZLECENIE"
-                  ? "Data akceptacji"
-                  : step === "WYKONANIE"
-                  ? "Data wykonania"
-                  : step === "PROTOKOL_WYSLANY"
-                  ? "Data protokołu"
-                  : step === "ODBIOR_PRAC"
-                  ? "Data odbioru prac"
-                  : "Data PWF";
+                    ? "Data akceptacji"
+                    : step === "WYKONANIE"
+                      ? "Data wykonania"
+                      : step === "PROTOKOL_WYSLANY"
+                        ? "Data protokołu"
+                        : step === "ODBIOR_PRAC"
+                          ? "Data odbioru prac"
+                          : "Data PWF";
 
               return (
                 <label key={step} className="grid gap-0.5">
@@ -474,9 +466,8 @@ export default function EditPanel({
                   </span>
                   <input
                     type="date"
-                    className={`border rounded px-2 py-1 ${dirty ? "ring-1 ring-yellow-400 bg-yellow-50 " : ""} ${
-                      !enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed " : ""
-                    }`}
+                    className={`border rounded px-2 py-1 ${dirty ? "ring-1 ring-yellow-400 bg-yellow-50 " : ""} ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed " : ""
+                      }`}
                     value={dates[step] || ""}
                     onChange={(e) => setDates((m) => ({ ...m, [step]: e.target.value }))}
                     disabled={!enabled}

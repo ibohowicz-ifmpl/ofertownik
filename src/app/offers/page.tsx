@@ -1,3 +1,4 @@
+export const revalidate = 0;
 // src/app/offers/page.tsx
 import { prisma } from "@/lib/prisma";
 import OffersTableClient, { type OfferRow } from "./OffersTableClient";
@@ -26,7 +27,7 @@ function safeDateDir(v?: string): "asc" | "desc" {
 }
 const STEP_LABEL: Record<string, string> = {
   WYSLANIE: "Wysłanie",
-  AKCEPTACJA_ZLECENIE: "Akceptacja",
+  AKCEPTACJA: "Akceptacja",
   WYKONANIE: "Wykonanie",
   PROTOKOL_WYSLANY: "Protokół",
   ODBIOR_PRAC: "Odbiór prac",
@@ -74,45 +75,90 @@ export default async function OffersPage({
 
   const tableKey = JSON.stringify({ selectedMonth, dir, selStep, selFrom, selTo, dateDir, showCancelled });
 
-  // DISTINCT miesiące (DESC)
-  const monthRows = await prisma.$queryRaw<{ offerMonth: string }[]>`
-    SELECT DISTINCT "offerMonth" FROM "Offer"
-    WHERE "offerMonth" IS NOT NULL
-    ORDER BY "offerMonth" DESC
+  // DISTINCT miesiące (YYYY-MM)
+  type MonthRow = { offerMonth: string };
+  const monthRows = await prisma.$queryRaw<MonthRow[]>`
+    SELECT DISTINCT
+      CASE
+        WHEN "offerNo" IS NOT NULL
+          THEN split_part("offerNo", '/', 2) || '-' || split_part("offerNo", '/', 3)
+        ELSE to_char("createdAt", 'YYYY-MM')
+      END AS "offerMonth"
+    FROM "Offer"
+    ORDER BY 1 DESC
   `;
-  const months = monthRows.map((r) => r.offerMonth);
+  const months = monthRows.map((m) => m.offerMonth);
 
   // WHERE
-  const where: any = {};
-  if (selectedMonth) where.offerMonth = selectedMonth;
-
-  // aktywne vs anulowane
-  if (showCancelled) {
-    where.cancelledAt = { not: null };
+  // Usuwamy where.offerMonth, bo nie ma takiej kolumny
+  let offers: any[] = [];
+  if (selectedMonth) {
+    // Faza 1: znajdź ID ofert pasujących miesiącem (offerNo lub createdAt)
+    const idRows = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT o."id"
+      FROM "Offer" o
+      WHERE (
+        CASE
+          WHEN o."offerNo" IS NOT NULL
+            THEN split_part(o."offerNo", '/', 2) || '-' || split_part(o."offerNo", '/', 3)
+          ELSE to_char(o."createdAt", 'YYYY-MM')
+        END
+      ) = ${selectedMonth}
+      ${showCancelled ? 'AND o."cancelledAt" IS NOT NULL' : 'AND o."cancelledAt" IS NULL'}
+      ORDER BY ${showCancelled ? 'o."cancelledAt" DESC' : 'o."offerNo" ' + dir.toUpperCase()}
+    `;
+    const ids = idRows.map(r => r.id);
+    if (ids.length === 0) {
+      offers = [];
+    } else {
+      // Faza 2: doładuj pełne rekordy Prisma z relacjami
+      offers = await prisma.offer.findMany({
+        where: { id: { in: ids } },
+        include: {
+          client: true,
+          milestones: { select: { step: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
+          costs: true,
+        },
+        // opcjonalnie: posortuj lokalnie wg kolejności 'ids'
+      } as any);
+      // utrzymaj kolejność wg 'ids':
+      const pos = new Map(ids.map((id, i) => [id, i]));
+      offers.sort((a: any, b: any) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+    }
   } else {
-    where.cancelledAt = null;
+    // Oryginalne pobieranie, bez filtra po miesiącu
+    offers = await prisma.offer.findMany({
+      where: {
+        ...(showCancelled ? { cancelledAt: { not: null } } : { cancelledAt: null }),
+        ...(selStep || selFrom || selTo
+          ? {
+            milestones: {
+              some: {
+                ...(selStep ? { step: selStep } : {}),
+                ...(selFrom || selTo
+                  ? {
+                    occurredAt: {
+                      ...(selFrom ? { gte: ymdToUtcStart(selFrom) } : {}),
+                      ...(selTo ? { lte: ymdToUtcEnd(selTo) } : {}),
+                    },
+                  }
+                  : {}),
+              },
+            },
+          }
+          : {}),
+      },
+      include: {
+        client: true,
+        milestones: { select: { step: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
+        costs: true as any,
+      },
+      orderBy: showCancelled ? { cancelledAt: "desc" as any } : { offerNo: dir as any },
+    } as any);
   }
-
-  // dodatkowe filtrowanie po krokach/datacie (dotyczy obu trybów)
-  if (selStep || selFrom || selTo) {
-    const stepCond: any = {};
-    if (selStep) stepCond.step = selStep;
-    const dateCond: any = {};
-    if (selFrom) dateCond.gte = ymdToUtcStart(selFrom);
-    if (selTo) dateCond.lte = ymdToUtcEnd(selTo);
-    if (Object.keys(dateCond).length > 0) stepCond.occurredAt = dateCond;
-    where.milestones = { some: stepCond };
-  }
-
-  // Pobierz oferty
-  const offers = await prisma.offer.findMany({
-    where,
-    include: { client: true, milestones: true, costs: true as any },
-    orderBy: showCancelled ? { cancelledAt: "desc" as any } : { offerNo: dir as any },
-  } as any);
 
   // (opcjonalnie) sort po MIN(occurredAt) dla wybranego kroku (gdy nie tryb anulowanych)
-  let offerMinDate = new Map<string, Date | null>();
+  const offerMinDate = new Map<string, Date | null>();
   if (!showCancelled && selStep) {
     const params: any[] = [selStep];
     let whereSql = `WHERE ("step"::text) = $1`;
@@ -126,7 +172,18 @@ export default async function OffersPage({
     }
     if (selectedMonth) {
       params.push(selectedMonth);
-      whereSql += ` AND "offerId" IN (SELECT "id" FROM "Offer" WHERE "offerMonth" = $${params.length})`;
+      whereSql += `
+        AND "offerId" IN (
+          SELECT "id" FROM "Offer"
+          WHERE (
+            CASE
+              WHEN "offerNo" IS NOT NULL
+                THEN split_part("offerNo", '/', 2) || '-' || split_part("offerNo", '/', 3)
+              ELSE to_char("createdAt", 'YYYY-MM')
+            END
+          ) = $${params.length}
+        )
+      `;
     }
     if (!showCancelled) {
       // tylko aktywne
@@ -153,32 +210,40 @@ export default async function OffersPage({
   }
 
   // Dane do tabeli (CSR)
-  const rows: OfferRow[] = offers.map((o: any) => ({
-    id: String(o.id),
-    offerNo: o.offerNo ?? null,
-    title: o.title ?? null,
-    clientName: o.client?.name ?? null,
-    contractor: o.contractor ?? null,
-    vendorOrderNo: o.vendorOrderNo ?? null,
-    valueNet: o.valueNet != null ? Number(o.valueNet) : null,
-    cancelledAt: o.cancelledAt ? new Date(o.cancelledAt).toISOString() : null, // ⬅️ NOWE
-    milestones: Array.isArray(o.milestones)
-      ? o.milestones.map((m: any) => ({
+  const findDate = (list: any[], step: string) =>
+    Array.isArray(list) ? (list.find((m) => m.step === step)?.occurredAt ?? null) : null;
+
+  const rows: OfferRow[] = offers.map((o: any) => {
+    const meta = (o.meta && typeof o.meta === 'object' && !Array.isArray(o.meta)) ? (o.meta as any) : {};
+    return {
+      ...o,
+      id: String(o.id),
+      offerNo: o.offerNo ?? null,
+      title: o.title ?? null,
+      clientName: o.client?.name ?? null,
+      contractor: meta.contractor ?? null,
+      vendorOrderNo: meta.vendorOrderNo ?? null,
+      valueNet: o.valueNet != null ? Number(o.valueNet) : null,
+      cancelledAt: o.cancelledAt ? new Date(o.cancelledAt).toISOString() : null,
+      milestones: Array.isArray(o.milestones)
+        ? o.milestones.map((m: any) => ({
           step: String(m.step),
           occurredAt: m?.occurredAt ? new Date(m.occurredAt).toISOString() : null,
         }))
-      : [],
-    costs: Array.isArray(o.costs)
-      ? o.costs.map((c: any) => ({ valueNet: c?.valueNet != null ? Number(c.valueNet) : null }))
-      : [],
-  }));
+        : [],
+      costs: Array.isArray(o.costs)
+        ? o.costs.map((c: any) => ({ valueNet: c?.amountNet != null ? Number(c.amountNet) : null }))
+        : [],
+      // Usuwamy ręczne mapowanie dat kroków (np. sentAt, acceptedAt, ...)
+    };
+  });
 
   // Linki sortowania
   const common = { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined };
-  const linkAsc = withParams("/offers", { ...common, dir: "asc" });
-  const linkDesc = withParams("/offers", { ...common, dir: "desc" });
-  const linkDateAsc = withParams("/offers", { ...common, dir, dateDir: "asc" });
-  const linkDateDesc = withParams("/offers", { ...common, dir, dateDir: "desc" });
+  const _linkAsc = withParams("/offers", { ...common, dir: "asc" });
+  const _linkDesc = withParams("/offers", { ...common, dir: "desc" });
+  const _linkDateAsc = withParams("/offers", { ...common, dir, dateDir: "asc" });
+  const _linkDateDesc = withParams("/offers", { ...common, dir, dateDir: "desc" });
 
   // Link przełącznika anulowanych
   const linkCancelledOn = withParams("/offers", { ...common, cancelled: "1" });
@@ -288,18 +353,16 @@ export default async function OffersPage({
             <div className="flex items-center gap-1 ml-2">
               <a
                 href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined, dir: "asc" })}
-                className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
-                  dir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
-                }`}
+                className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${dir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
+                  }`}
                 title="Sortuj rosnąco po numerze oferty"
               >
                 A→Z
               </a>
               <a
                 href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined, dir: "desc" })}
-                className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
-                  dir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
-                }`}
+                className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${dir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
+                  }`}
                 title="Sortuj malejąco po numerze oferty"
               >
                 Z→A
@@ -311,18 +374,16 @@ export default async function OffersPage({
               <div className="flex items-center gap-1 ml-1">
                 <a
                   href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dir, cancelled: showCancelled ? "1" : undefined, dateDir: "asc" })}
-                  className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
-                    dateDir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
-                  }`}
+                  className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${dateDir === "asc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
+                    }`}
                   title={`Sortuj rosnąco po dacie: ${STEP_LABEL[selStep]}`}
                 >
                   ▲ data
                 </a>
                 <a
                   href={withParams("/offers", { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dir, cancelled: showCancelled ? "1" : undefined, dateDir: "desc" })}
-                  className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${
-                    dateDir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
-                  }`}
+                  className={`inline-block rounded-xl px-3 py-2 border-2 border-white text-[14px] ${dateDir === "desc" ? "bg-white text-[#009CA6]" : "bg-transparent text-white hover:bg-white/10"
+                    }`}
                   title={`Sortuj malejąco po dacie: ${STEP_LABEL[selStep]}`}
                 >
                   ▼ data
@@ -378,7 +439,7 @@ export default async function OffersPage({
               rowAccent={ROW_ACCENT}
               row1Top={ROW1_TOP}
               row2Top={ROW2_TOP}
-              showCancelled={showCancelled} // ⬅️ NOWE
+              showCancelled={showCancelled}
             />
           </div>
         </div>

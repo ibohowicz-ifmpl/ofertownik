@@ -1,96 +1,73 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// w Next 15 dynamic params są asynchroniczne
-type RouteParams = { params: Promise<{ id: string }> };
-
-function bad(msg: string, code = 400) {
-  return NextResponse.json({ error: msg }, { status: code });
-}
-
-export async function GET(_req: Request, { params }: RouteParams) {
-  const { id } = await params;
-  if (!id) return bad("Missing id");
-
-  const offer = await prisma.offer.findUnique({
-    where: { id },
-    select: { cancelledAt: true, cancelReason: true },
-  });
-  if (!offer) return bad("Offer not found", 404);
-
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  const { id } = await ctx.params;
+  const offer = await prisma.offer.findUnique({ where: { id }, select: { cancelledAt: true, meta: true } });
+  const asMeta = (v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  const cancelReason = asMeta(offer?.meta).cancelReason ?? null;
   return NextResponse.json({
-    isCancelled: Boolean(offer.cancelledAt),
-    cancelledAt: offer.cancelledAt ? offer.cancelledAt.toISOString() : null,
-    reason: offer.cancelReason ?? null,
+    cancelledAt: offer?.cancelledAt ?? null,
+    cancelReason,
   });
 }
 
-/**
- * Anulowanie dozwolone TYLKO gdy:
- *  - brak jakichkolwiek dat etapów, LUB
- *  - ustawione wyłącznie 'WYSLANIE'.
- * (UI i tak ukrywa przycisk, ale to zabezpieczenie serwerowe.)
- */
-export async function POST(req: Request, { params }: RouteParams) {
-  const { id } = await params;
-  if (!id) return bad("Missing id");
+const asMeta = (v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 
-  const { reason } = (await req.json().catch(() => ({}))) as { reason?: string | null };
+async function setCancelled(id: string, reason?: string | null) {
+  const cur = await prisma.offer.findUnique({ where: { id }, select: { meta: true } });
+  const meta = asMeta(cur?.meta);
+  if (reason === undefined) {
+    delete meta.cancelReason;
+    await prisma.offer.update({ where: { id }, data: { cancelledAt: null, meta } });
+  } else {
+    meta.cancelReason = reason ?? null;
+    await prisma.offer.update({ where: { id }, data: { cancelledAt: new Date(), meta } });
+  }
+}
 
-  const offer = await prisma.offer.findUnique({ where: { id }, select: { id: true } });
-  if (!offer) return bad("Offer not found", 404);
+async function doCancel(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
 
-  const milestones = await prisma.offerMilestone.findMany({
-    where: { offerId: id },
-    select: { step: true },
-  });
-  const steps = new Set(milestones.map((m) => String(m.step)));
-  const hasAny = steps.size > 0;
-  const onlyWyslanie = steps.size === 1 && steps.has("WYSLANIE");
+  // query fallback
+  const url = new URL(req.url);
+  const qAction = url.searchParams.get('action'); // 'cancel'|'uncancel'|null
 
-  if (hasAny && !onlyWyslanie) {
-    return NextResponse.json(
-      {
-        error:
-          "Anulowanie niedozwolone. Ofertę można anulować tylko gdy brak dat lub ustawiono wyłącznie 'Wysłanie'.",
-        code: "CANCEL_NOT_ALLOWED",
-      },
-      { status: 422 }
-    );
+  // body (jeśli jest)
+  let body: any = {};
+  try { body = await req.json(); } catch { }
+
+  // rozpoznanie zamiaru
+  let intent: 'cancel' | 'uncancel' | 'toggle' | null = null;
+  if (qAction === 'cancel' || body?.action === 'cancel' || body?.cancelled === true) intent = 'cancel';
+  else if (qAction === 'uncancel' || body?.action === 'uncancel' || body?.cancelled === false) intent = 'uncancel';
+  else intent = 'toggle';
+
+  if (intent === 'toggle') {
+    const row = await prisma.offer.findUnique({ where: { id }, select: { cancelledAt: true } });
+    intent = row?.cancelledAt ? 'uncancel' : 'cancel';
   }
 
-  const updated = await prisma.offer.update({
-    where: { id },
-    data: {
-      cancelledAt: new Date(),
-      cancelReason: (reason ?? "").trim() || null,
-    },
-    select: { cancelledAt: true, cancelReason: true },
-  });
+  if (intent === 'cancel') {
+    const reason = typeof body?.reason === 'string' ? body.reason : null;
+    await setCancelled(id, reason);
+  } else {
+    await setCancelled(id, undefined);
+  }
 
-  return NextResponse.json({
-    isCancelled: true,
-    cancelledAt: updated.cancelledAt?.toISOString() ?? null,
-    reason: updated.cancelReason ?? null,
-  });
+  const out = await prisma.offer.findUnique({ where: { id }, select: { cancelledAt: true, meta: true } });
+  const reason = asMeta(out?.meta).cancelReason ?? null;
+  return NextResponse.json({ ok: true, cancelledAt: out?.cancelledAt ?? null, cancelReason: reason });
 }
 
-export async function DELETE(_req: Request, { params }: RouteParams) {
-  const { id } = await params;
-  if (!id) return bad("Missing id");
-
-  const offer = await prisma.offer.findUnique({ where: { id }, select: { id: true } });
-  if (!offer) return bad("Offer not found", 404);
-
-  const updated = await prisma.offer.update({
-    where: { id },
-    data: { cancelledAt: null, cancelReason: null },
-    select: { cancelledAt: true, cancelReason: true },
-  });
-
-  return NextResponse.json({
-    isCancelled: false,
-    cancelledAt: updated.cancelledAt ? updated.cancelledAt.toISOString() : null,
-    reason: updated.cancelReason ?? null,
-  });
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) { return doCancel(req, ctx); }
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) { return doCancel(req, ctx); }
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  // potraktuj jak 'uncancel'
+  const body = new Blob([JSON.stringify({ action: 'uncancel' })], { type: 'application/json' });
+  const fakeReq = new Request(req.url, { method: 'POST', body });
+  return POST(fakeReq, ctx);
 }

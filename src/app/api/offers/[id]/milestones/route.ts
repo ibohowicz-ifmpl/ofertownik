@@ -1,137 +1,161 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { $Enums } from '@prisma/client';
 
-// Next 15: dynamic params są asynchroniczne
-type RouteParams = { params: Promise<{ id: string }> };
+// Dozwolone kroki (PL, jak w schema.prisma)
+const VALID: ReadonlyArray<$Enums.OfferMilestoneStep> = [
+  'WYSLANIE',
+  'AKCEPTACJA',
+  'WYKONANIE',
+  'PROTOKOL_WYSLANY',
+  'ODBIOR_PRAC',
+  'PWF',
+];
 
-const ORDER = [
-  "WYSLANIE",
-  "AKCEPTACJA_ZLECENIE",
-  "WYKONANIE",
-  "PROTOKOL_WYSLANY",
-  "ODBIOR_PRAC",
-  "PWF",
-] as const;
+// Normalizacja kluczy (np. legacy UI, różne formaty)
+const normKey = (v: unknown) =>
+  (typeof v === 'string' ? v.trim() : '')
+    .toUpperCase()
+    .replace(/[\s\-]+/g, '_');
 
-function bad(msg: string, code = 400) {
-  return NextResponse.json({ error: msg }, { status: code, headers: { "Cache-Control": "no-store" } });
+// Legacy aliasy -> aktualne enumy (wszystko znormalizowane)
+const LEGACY_MAP: Record<string, $Enums.OfferMilestoneStep> = {
+  'AKCEPTACJA_ZLECENIE': 'AKCEPTACJA',
+  'AKCEPTACJA_ZLECENIA': 'AKCEPTACJA',
+  'AKCEPTACJA_ZAMOWIENIA': 'AKCEPTACJA',
+  'AKCEPTACJA_OFERTY': 'AKCEPTACJA',
+  'AKCEPTACJA': 'AKCEPTACJA', // wprost
+};
+
+type InItem = { step: string; occurredAt: string | Date | null | undefined };
+
+const asDateUTC = (v: any): Date | null => {
+  if (v === '' || v === null || v === undefined) return null;
+  const s = typeof v === 'string' ? v.trim() : v;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) {
+    const z = new Date(`${s}T00:00:00Z`);
+    return Number.isNaN(z.getTime()) ? null : z;
+  }
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+};
+
+function toEnum(value: unknown): $Enums.OfferMilestoneStep | null {
+  if (typeof value !== 'string' || !value) return null;
+  const key = normKey(value);
+  // bezpośrednio zgodne z enumem (PL)
+  if ((VALID as readonly string[]).includes(key)) return key as $Enums.OfferMilestoneStep;
+  // aliasy legacy
+  if (LEGACY_MAP[key]) return LEGACY_MAP[key];
+  // log pomocniczy:
+  console.warn('[milestones] Unknown step:', value, '→ normalized:', key, 'Allowed:', [...VALID, ...Object.keys(LEGACY_MAP)]);
+  return null;
 }
 
-function parseYMD(s: string | null | undefined): Date | null {
-  if (!s) return null;
-  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00.000Z`);
-  return isNaN(d.getTime()) ? null : d;
+// Parsowanie payloadu:
+// - preferuje items: [{step,occurredAt}]
+// - wspiera płaski kształt: { WYSLANIE: '2025-10-01', AKCEPTACJA_ZLECENIE: '' } ('' = usuń)
+function parseBody(body: any): { toCreate: Array<{ step: $Enums.OfferMilestoneStep; occurredAt: Date }>, toDelete: Array<$Enums.OfferMilestoneStep>, replace: boolean } {
+  const replace = body?.replace === true;
+
+  const flatEntries: Array<InItem> =
+    body && typeof body === 'object' && !Array.isArray(body?.items)
+      ? Object.entries(body)
+        .filter(([k]) => typeof k === 'string') // ← zostaw wszystko, mapuje toEnum()
+        .map(([k, v]) => ({ step: k, occurredAt: v as any }))
+      : [];
+
+  const arrEntries: Array<InItem> = Array.isArray(body?.items) ? (body.items as InItem[]) : [];
+
+  const raw: InItem[] = arrEntries.length > 0 ? arrEntries : flatEntries;
+
+  const toCreate: Array<{ step: $Enums.OfferMilestoneStep; occurredAt: Date }> = [];
+  const toDelete: Array<$Enums.OfferMilestoneStep> = [];
+
+  for (const it of raw) {
+    const step = toEnum(it?.step);
+    if (!step) continue;
+    const dt = asDateUTC(it?.occurredAt);
+    if (dt) toCreate.push({ step, occurredAt: dt });
+    else toDelete.push(step); // pusty string / null = usuń ten krok
+  }
+
+  return { toCreate, toDelete, replace };
 }
 
-export async function GET(_req: Request, { params }: RouteParams) {
-  const { id } = await params;
-  if (!id) return bad("Missing id");
-
-  const ms = await prisma.offerMilestone.findMany({
+// GET – zwróć kroki w PL (jak w enumie)
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const rows = await prisma.offerMilestone.findMany({
     where: { offerId: id },
+    orderBy: { occurredAt: 'asc' },
     select: { step: true, occurredAt: true },
-    orderBy: { occurredAt: "asc" },
   });
-
-  return NextResponse.json(
-    {
-      items: ms.map((m) => ({
-        step: String(m.step),
-        occurredAt: m.occurredAt ? m.occurredAt.toISOString().slice(0, 10) : null,
-      })),
-    },
-    { headers: { "Cache-Control": "no-store" } }
-  );
+  console.log('[milestones] GET rows:', rows);
+  return NextResponse.json({
+    items: rows.map(r => ({
+      step: r.step,
+      occurredAt: r.occurredAt.toISOString().slice(0, 10),
+    })),
+  });
 }
 
-export async function PUT(req: Request, { params }: RouteParams) {
-  const { id } = await params;
-  if (!id) return bad("Missing id");
+// PUT/POST – replace / upsert + delete pojedynczych kroków
+async function save(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
 
-  const body = await req.json().catch(() => ({}));
+  let body: any = {};
+  try { body = await req.json(); } catch { /* brak body = ok */ }
 
-  // Zbierz stan docelowy z formatu płaskiego i items[]
-  const map: Record<string, string | null> = {};
-  for (const k of ORDER) {
-    if (Object.prototype.hasOwnProperty.call(body, k)) map[k] = body[k];
-  }
-  if (Array.isArray(body?.items)) {
-    for (const it of body.items as Array<any>) {
-      const step = String(it?.step || "");
-      const when = it?.occurredAt ?? it?.date ?? it?.at ?? null;
-      if (ORDER.includes(step as any)) map[step] = when;
-    }
-  }
+  const { toCreate, toDelete, replace } = parseBody(body);
+  console.log('[milestones] RAW body:', body);
+  console.log('[milestones] parsed:', { replace, toCreate, toDelete });
 
-  // Walidacja ciągłości i monotoniczności (>=)
-  type Err = { step: string; msg: string };
-  const errors: Err[] = [];
-  let prevDate: Date | null = null;
+  const url = new URL(req.url);
+  const wantDebug = url.searchParams.get('debug') === '1';
 
-  for (let i = 0; i < ORDER.length; i++) {
-    const step = ORDER[i];
-    const raw = map[step] ?? null;
-    const dt = parseYMD(raw);
-
-    if (i > 0) {
-      const prevStep = ORDER[i - 1];
-      const prevRaw = map[prevStep] ?? null;
-      const prev = parseYMD(prevRaw);
-      if (dt && !prev) {
-        errors.push({
-          step,
-          msg: `Nie można ustawić „${step}” bez wcześniejszego etapu „${prevStep}”.`,
-        });
-      }
-    }
-
-    if (dt && prevDate && dt < prevDate) {
-      errors.push({
-        step,
-        msg: `Data etapu „${step}” nie może być wcześniejsza niż poprzedni etap.`,
+  if (replace) {
+    await prisma.offerMilestone.deleteMany({ where: { offerId: id } });
+    if (toCreate.length > 0) {
+      await prisma.offerMilestone.createMany({
+        data: toCreate.map(x => ({ offerId: id, step: x.step, occurredAt: x.occurredAt })),
+        skipDuplicates: true,
       });
     }
-
-    if (dt) prevDate = dt;
+  } else {
+    if (toDelete.length > 0) {
+      await prisma.offerMilestone.deleteMany({
+        where: { offerId: id, step: { in: toDelete } },
+      });
+    }
+    if (toCreate.length > 0) {
+      await prisma.$transaction(
+        toCreate.map(x =>
+          prisma.offerMilestone.upsert({
+            where: { offerId_step: { offerId: id, step: x.step } }, // wymagane @@unique([offerId, step])
+            update: { occurredAt: x.occurredAt },
+            create: { offerId: id, step: x.step, occurredAt: x.occurredAt },
+          })
+        )
+      );
+    }
   }
 
-  if (errors.length) {
-    return NextResponse.json({ errors }, { status: 422, headers: { "Cache-Control": "no-store" } });
-  }
-
-  // Zbuduj finalną listę rekordów do utworzenia (tylko kroki z datą)
-  const createItems = ORDER
-    .map((step) => {
-      const dt = parseYMD(map[step] ?? null);
-      return dt ? { offerId: id, step: step as any, occurredAt: dt } : null;
-    })
-    .filter(Boolean) as Array<{ offerId: string; step: any; occurredAt: Date }>;
-
-  // **Uproszczenie – ZAWSZE REPLACE**:
-  // 1) usuń wszystkie milestone’y tej oferty
-  // 2) utwórz od zera tylko te, które przyszły
-  await prisma.$transaction([
-    prisma.offerMilestone.deleteMany({ where: { offerId: id } }),
-    ...(createItems.length ? [prisma.offerMilestone.createMany({ data: createItems })] : []),
-  ]);
-
-  // Zwróć świeży stan
-  const ms = await prisma.offerMilestone.findMany({
+  const out = await prisma.offerMilestone.findMany({
     where: { offerId: id },
+    orderBy: { occurredAt: 'asc' },
     select: { step: true, occurredAt: true },
-    orderBy: { occurredAt: "asc" },
   });
 
-  return NextResponse.json(
-    {
-      mode: "replace", // debug: zawsze replace
-      items: ms.map((m) => ({
-        step: String(m.step),
-        occurredAt: m.occurredAt ? m.occurredAt.toISOString().slice(0, 10) : null,
-      })),
-    },
-    { headers: { "Cache-Control": "no-store" } }
-  );
+  return NextResponse.json({
+    ok: true,
+    items: out.map(r => ({
+      step: r.step,
+      occurredAt: r.occurredAt.toISOString().slice(0, 10),
+    })),
+    ...(wantDebug ? { debug: { replace, toCreate, toDelete } } : {}),
+  });
 }
+
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) { return save(req, ctx); }
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) { return save(req, ctx); }

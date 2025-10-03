@@ -96,7 +96,7 @@ type RowOffer = {
 
 async function ensureClientByName(nameRaw: string) {
   const name10 = nameRaw.toUpperCase().slice(0, 10);
-  let found = await prisma.client.findFirst({
+  const found = await prisma.client.findFirst({
     where: { name: name10 },
     select: { id: true, name: true },
   });
@@ -123,7 +123,7 @@ async function main() {
   const wb = XLSX.read(fs.readFileSync(filePath), { type: "buffer" });
 
   const clients = XLSX.utils.sheet_to_json<{ clientName: string }>(wb.Sheets["Clients"] || {});
-  const offers  = XLSX.utils.sheet_to_json<RowOffer>(wb.Sheets["Offers"]  || {});
+  const offers = XLSX.utils.sheet_to_json<RowOffer>(wb.Sheets["Offers"] || {});
   const milestonesRaw = XLSX.utils.sheet_to_json<{ offerNo: string; step: string; date: any }>(wb.Sheets["Milestones"] || {});
   const costs = XLSX.utils.sheet_to_json<{ offerNo: string; name: string; valueNet: any }>(wb.Sheets["Costs"] || {});
 
@@ -176,9 +176,9 @@ async function main() {
 
     const offerDateYMD = toYMD(o.offerDate);
     let offerMonth: string | null = null;
-    if (offerDateYMD) offerMonth = offerDateYMD.slice(0,7);
-    else if (wyslanieYMDByOffer.has(offerNo)) offerMonth = (wyslanieYMDByOffer.get(offerNo) as string).slice(0,7);
-    else if (firstMilestoneYMDByOffer.has(offerNo)) offerMonth = (firstMilestoneYMDByOffer.get(offerNo) as string).slice(0,7);
+    if (offerDateYMD) offerMonth = offerDateYMD.slice(0, 7);
+    else if (wyslanieYMDByOffer.has(offerNo)) offerMonth = (wyslanieYMDByOffer.get(offerNo) as string).slice(0, 7);
+    else if (firstMilestoneYMDByOffer.has(offerNo)) offerMonth = (firstMilestoneYMDByOffer.get(offerNo) as string).slice(0, 7);
 
     const dataBase: any = {
       title: (o.title || "").trim() || null,

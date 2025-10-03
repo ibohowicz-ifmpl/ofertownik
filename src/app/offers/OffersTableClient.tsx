@@ -15,19 +15,30 @@ export type OfferRow = {
   cancelledAt?: string | null; // może być null dla aktywnych
   milestones: { step: string; occurredAt: string | null }[];
   costs: { valueNet: number | null }[];
+  acceptedAt?: string | Date;
 };
 
 type AttentionLevel = "NONE" | "YELLOW" | "RED" | "BLUE";
 
-const STEP_LABEL: Record<string, string> = {
+const STEP_LABEL = {
   WYSLANIE: "Wysłanie",
-  AKCEPTACJA_ZLECENIE: "Akceptacja",
+  AKCEPTACJA: "Akceptacja",
   WYKONANIE: "Wykonanie",
   PROTOKOL_WYSLANY: "Protokół",
   ODBIOR_PRAC: "Odbiór prac",
   PWF: "PWF",
-};
-const STEP_ORDER = Object.keys(STEP_LABEL);
+} as const;
+
+const STEP_ORDER = [
+  "WYSLANIE",
+  "AKCEPTACJA",
+  "WYKONANIE",
+  "PROTOKOL_WYSLANY",
+  "ODBIOR_PRAC",
+  "PWF",
+] as const;
+
+type StepKey = typeof STEP_ORDER[number];
 
 function marzaClass(m: number | null) {
   if (m == null) return "text-gray-700";
@@ -50,10 +61,41 @@ function readAttention(offerId: string): { level: AttentionLevel; note: string }
   }
 }
 
-
 function wyslanieOf(o: OfferRow): string | null {
   return (o.milestones ?? []).find((m) => m.step === "WYSLANIE")?.occurredAt ?? null;
 }
+
+// Dodaj typ Row zgodny z Twoją strukturą:
+type Row = {
+  id: string;
+  offerNo: string;
+  title: string;
+  clientName: string;
+  valueNet: number;
+  costsSumNet: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  finalizedAt: string;
+  cancelledAt: string;
+  sentAt: string;
+  acceptedAt: string;
+  executedAt: string;
+  protocolAt: string;
+  handoverAt: string;
+  pwfAt: string;
+  contractor: string;
+  vendorOrderNo: string;
+};
+
+type OffersTableClientProps = {
+  rows: Row[];
+  headerBg: string;
+  rowAccent: string;
+  row1Top?: number;
+  row2Top?: number;
+  showCancelled?: boolean;
+};
 
 export default function OffersTableClient({
   rows,
@@ -61,16 +103,9 @@ export default function OffersTableClient({
   rowAccent,
   row1Top = 0,
   row2Top = 40,
-  showCancelled = false, // ⬅️ tryb "Pokaż anulowane"
-}: {
-  rows?: OfferRow[];
-  headerBg: string;
-  rowAccent: string;
-  row1Top?: number;
-  row2Top?: number;
-  showCancelled?: boolean;
-}) {
-  const data: OfferRow[] = Array.isArray(rows) ? rows : [];
+  showCancelled = false,
+}: OffersTableClientProps) {
+  const data: Row[] = Array.isArray(rows) ? rows : [];
 
   // Stabilny klucz po ID do efektów zależnych od listy
   const idsKey = useMemo(() => data.map((o) => o.id).join(","), [data]);
@@ -166,13 +201,15 @@ export default function OffersTableClient({
           </th>
 
           {!showCancelled ? (
-            <th
-              className="py-2 pr-1 text-center sticky z-30 h-10 align-middle"
-              style={{ top: row1Top, backgroundColor: headerBg }}
-              colSpan={STEP_ORDER.length}
-            >
-              Daty etapów
-            </th>
+            <>
+              <th
+                className="py-2 pr-1 text-center sticky z-30 h-10 align-middle"
+                style={{ top: row1Top, backgroundColor: headerBg }}
+                colSpan={STEP_ORDER.length + 1}
+              >
+                Daty etapów
+              </th>
+            </>
           ) : (
             <>
               <th
@@ -181,6 +218,13 @@ export default function OffersTableClient({
                 rowSpan={2}
               >
                 Wysłanie
+              </th>
+              <th
+                className="py-2 pr-2 whitespace-nowrap sticky z-30 h-10 align-middle"
+                style={{ top: row1Top, backgroundColor: headerBg }}
+                rowSpan={2}
+              >
+                Akceptacja
               </th>
               <th
                 className="py-2 pr-2 whitespace-nowrap sticky z-30 h-10 align-middle"
@@ -248,6 +292,12 @@ export default function OffersTableClient({
                 {STEP_LABEL[s]}
               </th>
             ))}
+            <th
+              className="py-2 pr-1 w-[5.25rem] text-[11px] sticky z-20 h-10"
+              style={{ top: row2Top, backgroundColor: headerBg }}
+            >
+              Akceptacja
+            </th>
           </tr>
         )}
       </thead>
@@ -302,20 +352,33 @@ export default function OffersTableClient({
               <td className="py-2 pr-3 whitespace-nowrap text-right tabular-nums">{formatMoney(netto)}</td>
 
               {!showCancelled ? (
-                STEP_ORDER.map((s) => {
-                  const when = (o.milestones ?? []).find((m) => String(m.step) === s)?.occurredAt ?? null;
-                  return (
-                    <td key={s} className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                      {formatISODate(when)}
-                    </td>
-                  );
-                })
+                <>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.sentAt)}
+                  </td>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.acceptedAt)}
+                  </td>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.executedAt)}
+                  </td>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.protocolAt)}
+                  </td>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.handoverAt)}
+                  </td>
+                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {formatISODate(o.pwfAt)}
+                  </td>
+                </>
               ) : (
                 <>
-                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{formatISODate(wyslanie)}</td>
+                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{formatISODate(o.sentAt)}</td>
+                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{formatISODate(o.acceptedAt)}</td>
                   <td
                     className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center"
-                    title={cancelReason || undefined} // ⬅️ tooltip z powodem anulowania
+                    title={cancelReason || undefined}
                   >
                     {formatISODate(anulowano)}
                   </td>

@@ -1,7 +1,7 @@
-ï»¿// src/app/api/offers/export/route.ts
+// src/app/api/offers/export/route.ts
 import { prisma } from "@/lib/prisma";
 
-// 12345,67 (PL: przecinek, bez spacji tysiÄ™cy)
+// 12345,67 (PL: przecinek, bez spacji tysiêcy)
 function toPL(x: any) {
   if (x === null || x === undefined) return "";
   const n = Number(x);
@@ -9,7 +9,7 @@ function toPL(x: any) {
   return n.toLocaleString("pl-PL", { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// "15,20 %" jako TEKST dla Excela (nie zamieni na datÄ™)
+// "15,20 %" jako TEKST dla Excela (nie zamieni na datê)
 function toPLPercentText(x: any) {
   if (x === null || x === undefined) return "";
   const n = Number(x);
@@ -28,7 +28,7 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  const header = ["Nr oferty","TytuÅ‚","Odbiorca","WartoÅ›Ä‡ netto","WartoÅ›Ä‡ kosztÃ³w","Zysk","MarÅ¼a","Etap","Utworzono"];
+  const header = ["Nr oferty", "Tytu³", "Odbiorca", "Wartoœæ netto", "Wartoœæ kosztów", "Zysk", "Mar¿a", "Etap", "Utworzono"];
   const out: string[] = [];
   out.push(header.join("\t"));
 
@@ -39,11 +39,26 @@ export async function GET() {
       sanitize(o.title),
       sanitize(o.client?.name),
       toPL(o.valueNet),
-      toPL(o.wartoscKosztow),
-      toPL(o.zysk),
-      toPLPercentText(o.marza), // <<< marÅ¼a jako tekst
+      // ...inne kolumny...
+      (() => {
+        const koszty = Number(o.costsSumNet ?? 0);
+        return toPL(koszty);
+      })(),
+      (() => {
+        const koszty = Number(o.costsSumNet ?? 0);
+        const wartosc = Number(o.valueNet ?? 0);
+        const zysk = wartosc - koszty;
+        return toPL(zysk);
+      })(),
+      (() => {
+        const koszty = Number(o.costsSumNet ?? 0);
+        const wartosc = Number(o.valueNet ?? 0);
+        const zysk = wartosc - koszty;
+        const marza = wartosc > 0 ? zysk / wartosc : 0;
+        return toPLPercentText(marza);
+      })(),
       sanitize(last?.step),
-      new Date(o.createdAt).toISOString().slice(0,10),
+      new Date(o.createdAt).toISOString().slice(0, 10),
     ].join("\t"));
   }
 

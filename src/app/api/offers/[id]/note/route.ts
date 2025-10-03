@@ -1,38 +1,26 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getParamId, metaGet, metaPatch } from '@/lib/api-helpers';
 
-// GET /api/offers/[id]/note  -> { note: string|null }
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  try {
-    const offer = await prisma.offer.findUnique({
-      where: { id },
-      select: { note: true },
-    });
-    return NextResponse.json({ note: offer?.note ?? null });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
-  }
+  const id = await getParamId(ctx);
+  const offer = await prisma.offer.findUnique({ where: { id }, select: { meta: true } });
+  const note = metaGet<string>(offer?.meta ?? null, 'note', '');
+  return NextResponse.json({ note });
 }
 
-// PUT /api/offers/[id]/note  Body: { note: string|null }
-export async function PUT(
+export async function POST(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  try {
-    const body = await req.json();
-    const updated = await prisma.offer.update({
-      where: { id },
-      data: { note: body?.note ?? null },
-      select: { note: true },
-    });
-    return NextResponse.json({ note: updated.note ?? null });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
-  }
+  const id = await getParamId(ctx);
+  const body = await req.json();
+  const note: string = String(body?.note ?? '');
+  const cur = await prisma.offer.findUnique({ where: { id }, select: { meta: true } });
+  const nextMeta = metaPatch(cur?.meta ?? null, { note });
+  await prisma.offer.update({ where: { id }, data: { meta: nextMeta } });
+  return NextResponse.json({ ok: true });
 }

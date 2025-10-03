@@ -99,7 +99,7 @@ export default function NewOfferPage() {
       offerDate,
       seq: "01",
     }),
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []
   );
 
   const dirty =
@@ -378,9 +378,8 @@ export default function NewOfferPage() {
               <div className="flex items-center">
                 <input
                   ref={refOfferNo}
-                  className={`border rounded px-2 py-1 font-mono flex-1 ${
-                    badNumberFormat ? "ring-1 ring-yellow-400 bg-yellow-50" : numberExists ? "ring-1 ring-red-500 bg-red-50" : ""
-                  }`}
+                  className={`border rounded px-2 py-1 font-mono flex-1 ${badNumberFormat ? "ring-1 ring-yellow-400 bg-yellow-50" : numberExists ? "ring-1 ring-red-500 bg-red-50" : ""
+                    }`}
                   value={`${offerNo}${checkingNo ? " ⏳" : ""}`}
                   readOnly
                   aria-invalid={badNumberFormat || numberExists}
@@ -425,7 +424,7 @@ export default function NewOfferPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-</div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="grid gap-1">

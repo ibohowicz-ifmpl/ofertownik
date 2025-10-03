@@ -4,26 +4,29 @@ generator client {
 
 datasource db {
   provider          = "postgresql"
-  url               = env("DATABASE_URL")         // pooled (z pgbouncer=true)
-  directUrl         = env("DIRECT_URL")           // BEZ poolera
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")  // BEZ poolera
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
+  id           String      @id @default(uuid()) @db.Uuid
+  email        String      @unique
   firstName    String
   lastName     String
-  initials     String    @unique
+  initials     String      @unique
   phone        String?
   position     String?
-  defaultMpkId String?
+  defaultMpkId String?     @db.Uuid
   globalRole   GlobalRole?
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
-  offers       Offer[]   @relation("OfferAuthor")
+  defaultMpk MPK?       @relation("UserDefaultMPK", fields: [defaultMpkId], references: [id])
+  offers     Offer[]    @relation("OfferAuthor")
+  userMPKs   UserMPK[]
+  auditLogs  AuditLog[]
 }
 
 enum GlobalRole {
@@ -33,29 +36,30 @@ enum GlobalRole {
 }
 
 model MPK {
-  id      String   @id @default(uuid())
-  code3   String   @unique @db.Char(3)
-  name    String
-  street  String?
+  id       String  @id @default(uuid()) @db.Uuid
+  code3    String  @unique @db.Char(3)
+  name     String
+  street   String?
   postcode String?
-  city    String?
-  active  Boolean  @default(true)
+  city     String?
+  active   Boolean @default(true)
 
-  offers  Offer[]
-  users   UserMPK[]
-  clients ClientMPK[]
+  users            UserMPK[]
+  clients          ClientMPK[]
+  offers           Offer[]
+  offerNoSequences OfferNoSequence[]
+  usersDefault     User[]            @relation("UserDefaultMPK")
 }
 
 model UserMPK {
-  userId String
-  mpkId  String
+  userId String      @db.Uuid
+  mpkId  String      @db.Uuid
   role   UserMPKRole
 
-  user   User   @relation(fields: [userId], references: [id])
-  mpk    MPK    @relation(fields: [mpkId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  mpk  MPK  @relation(fields: [mpkId], references: [id])
 
   @@id([userId, mpkId])
-  @@unique([userId, mpkId])
 }
 
 enum UserMPKRole {
@@ -66,80 +70,81 @@ enum UserMPKRole {
 }
 
 model Client {
-  id        String   @id @default(uuid())
-  nip       String   @unique
-  name      String
-  street    String?
-  postcode  String?
-  city      String?
-  isActive  Boolean  @default(true)
-  notes     String?
-  meta      Json?
+  id       String  @id @default(uuid()) @db.Uuid
+  nip      String  @unique
+  name     String
+  street   String?
+  postcode String?
+  city     String?
+  isActive Boolean @default(true)
+  notes    String?
+  meta     Json?
 
-  contacts  ClientContact[]
-  offers    Offer[]
-  mpks      ClientMPK[]
+  mpks     ClientMPK[]
+  contacts ClientContact[]
+  offers   Offer[]
 }
 
 model ClientMPK {
-  clientId     String
-  mpkId        String
+  clientId     String  @db.Uuid
+  mpkId        String  @db.Uuid
   billingNotes String?
 
-  client       Client @relation(fields: [clientId], references: [id])
-  mpk          MPK    @relation(fields: [mpkId], references: [id])
+  client Client @relation(fields: [clientId], references: [id])
+  mpk    MPK    @relation(fields: [mpkId], references: [id])
 
   @@id([clientId, mpkId])
-  @@unique([clientId, mpkId])
 }
 
 model ClientContact {
-  id          String   @id @default(uuid())
-  clientId    String
-  firstName   String
-  lastName    String
-  email       String?
-  phone       String?
-  roleTitle   String?
-  isActive    Boolean  @default(true)
-  meta        Json?
+  id        String  @id @default(uuid())
+  clientId  String  @db.Uuid
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  roleTitle String?
+  isActive  Boolean @default(true)
+  meta      Json?
 
-  client      Client   @relation(fields: [clientId], references: [id])
-  offers      Offer[]  @relation("OfferClientContact")
+  client Client  @relation(fields: [clientId], references: [id])
+  offers Offer[] @relation("OfferClientContact")
 }
 
 model Offer {
-  id              String    @id @default(uuid())
-  offerNo         String?   @unique
-  mpkId           String
-  clientId        String
+  id              String      @id @default(uuid())
+  offerNo         String?     @unique
+  mpkId           String?     @db.Uuid
+  clientId        String      @db.Uuid
   clientContactId String?
   title           String
-  valueNet        Decimal?
-  currency        String    @default("PLN")
-  authorUserId    String
-  status          OfferStatus @default(DRAFT)
-  createdAt       DateTime  @default(now())
+  valueNet        Decimal     @db.Decimal(12, 2)
+  currency        String      @default("PLN")
+  authorUserId    String      @db.Uuid
+  status          OfferStatus
+  createdAt       DateTime    @default(now())
   finalizedAt     DateTime?
   meta            Json?
-  costsSumNet     Decimal   @default(0)
+  costsSumNet     Decimal     @default(0) @db.Decimal(12, 2)
+  cancelledAt     DateTime?   @db.Timestamptz
 
-  mpk             MPK       @relation(fields: [mpkId], references: [id])
-  client          Client    @relation(fields: [clientId], references: [id])
-  clientContact   ClientContact? @relation("OfferClientContact", fields: [clientContactId], references: [id])
-  author          User      @relation("OfferAuthor", fields: [authorUserId], references: [id])
-
-  items           OfferItem[]
-  terms           OfferTerms?
-  milestones      OfferMilestone[]
-  documents       OfferDocument[]
-  costs           OfferCost[]
+  mpk           MPK?             @relation(fields: [mpkId], references: [id])
+  client        Client           @relation(fields: [clientId], references: [id])
+  clientContact ClientContact?   @relation("OfferClientContact", fields: [clientContactId], references: [id])
+  author        User             @relation("OfferAuthor", fields: [authorUserId], references: [id])
+  items         OfferItem[]
+  terms         OfferTerms?
+  milestones    OfferMilestone[]
+  documents     OfferDocument[]
+  costs         OfferCost[]
+  auditLogs     AuditLog[]
 
   @@index([mpkId])
   @@index([clientId])
   @@index([createdAt(sort: Desc)])
   @@index([finalizedAt(sort: Desc)])
   @@index([offerNo])
+  @@index([cancelledAt])
 }
 
 enum OfferStatus {
@@ -151,42 +156,31 @@ enum OfferStatus {
 }
 
 model OfferItem {
-  id            String   @id @default(uuid())
-  offerId       String
-  lp            Int
-  name          String
-  qty           Decimal  @default(1)
-  unit          String?
-  priceSuggested Decimal?
-  totalSuggested Decimal?
-  priceOnOffer   Decimal?
-  totalOnOffer   Decimal?
+  id             String   @id @default(uuid())
+  offerId        String
+  lp             Int
+  name           String
+  qty            Decimal  @default(1) @db.Decimal(12, 3)
+  unit           String   @db.VarChar(12)
+  priceSuggested Decimal? @db.Decimal(12, 2)
+  totalSuggested Decimal? @db.Decimal(12, 2)
+  priceOnOffer   Decimal? @db.Decimal(12, 2)
+  totalOnOffer   Decimal? @db.Decimal(12, 2)
   showOnOffer    Boolean  @default(true)
   meta           Json?
 
-  offer         Offer    @relation(fields: [offerId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
 }
 
 model OfferTerms {
-  id           String   @id @default(uuid())
-  offerId      String   @unique
-  validityDays Int?
-  deliveryDesc String?
-  vatRate      Decimal?
+  id           String  @id @default(uuid())
+  offerId      String  @unique
+  validityDays Int
+  deliveryDesc String
+  vatRate      Decimal @db.Decimal(4, 2)
   meta         Json?
 
-  offer        Offer    @relation(fields: [offerId], references: [id])
-}
-
-model OfferMilestone {
-  id        String   @id @default(uuid())
-  offerId   String
-  step      OfferMilestoneStep
-  occurredAt DateTime
-
-  offer     Offer    @relation(fields: [offerId], references: [id])
-
-  @@unique([offerId, step])
+  offer Offer @relation(fields: [offerId], references: [id])
 }
 
 enum OfferMilestoneStep {
@@ -198,24 +192,15 @@ enum OfferMilestoneStep {
   PWF
 }
 
-model OfferDocument {
-  id         String   @id @default(uuid())
+model OfferMilestone {
+  id         String             @id @default(uuid())
   offerId    String
-  type       OfferDocumentType
-  status     OfferDocumentStatus
-  version    Int
-  fileKey    String
-  fileName   String
-  mime       String?
-  sizeBytes  Int?
-  sha256     String
-  generatedAt DateTime
-  sentAt     DateTime?
-  metadata   Json?
+  step       OfferMilestoneStep
+  occurredAt DateTime
 
-  offer      Offer    @relation(fields: [offerId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
 
-  @@index([offerId, type, version(sort: Desc)])
+  @@unique([offerId, step])
 }
 
 enum OfferDocumentType {
@@ -230,40 +215,60 @@ enum OfferDocumentStatus {
   SENT
 }
 
-model OfferNoSequence {
-  mpkId     String
-  yyyymmdd  String  @db.Char(8)
-  initials  String  @db.Char(4)
-  lastNo    Int
+model OfferDocument {
+  id          String              @id @default(uuid())
+  offerId     String
+  type        OfferDocumentType
+  status      OfferDocumentStatus
+  version     Int
+  fileKey     String
+  fileName    String
+  mime        String
+  sizeBytes   BigInt
+  sha256      String              @db.Char(64)
+  generatedAt DateTime
+  sentAt      DateTime?
+  metadata    Json?
 
-  mpk       MPK     @relation(fields: [mpkId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
+
+  @@index([offerId, type, version(sort: Desc)])
+}
+
+model OfferNoSequence {
+  mpkId    String @db.Uuid
+  yyyymmdd String @db.Char(8)
+  initials String @db.Char(4)
+  lastNo   Int
+
+  mpk MPK @relation(fields: [mpkId], references: [id])
 
   @@id([mpkId, yyyymmdd, initials])
 }
 
 model OfferCost {
-  id         String   @id @default(uuid())
-  offerId    String
-  postedAt   DateTime
-  category   String?
-  vendor     String?
-  invoiceNo  String?
-  amountNet  Decimal  // NOT NULL
-  meta       Json?
+  id        String   @id @default(uuid())
+  offerId   String
+  postedAt  DateTime
+  category  String   @db.VarChar(32)
+  vendor    String   @db.VarChar(128)
+  invoiceNo String   @db.VarChar(64)
+  amountNet Decimal  @db.Decimal(12, 2)
+  meta      Json?
 
-  offer      Offer    @relation(fields: [offerId], references: [id])
+  offer Offer @relation(fields: [offerId], references: [id])
 
   @@index([offerId, postedAt])
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String
-  offerId   String?
-  action    String
-  at        DateTime
-  meta      Json?
+  id      String   @id @default(uuid())
+  userId  String   @db.Uuid
+  offerId String?
+  action  String
+  at      DateTime
+  meta    Json?
 
-  user      User     @relation(fields: [userId], references: [id])
-  offer     Offer?   @relation(fields: [offerId], references: [id])
+  user  User   @relation(fields: [userId], references: [id])
+  offer Offer? @relation(fields: [offerId], references: [id])
 }

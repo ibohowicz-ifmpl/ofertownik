@@ -1,8 +1,10 @@
 // src/app/offers/[id]/editDates.tsx
 "use client";
 
+import React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useCancelStatus, SoftBlock } from "./cancelGuard";
+import { useRouter } from 'next/navigation';
 
 type Props = {
   id: string;
@@ -10,19 +12,18 @@ type Props = {
 };
 
 const STEP_ORDER = [
-  "WYSLANIE",
-  "AKCEPTACJA_ZLECENIE",
-  "WYKONANIE",
-  "PROTOKOL_WYSLANY",
-  "ODBIOR_PRAC",
-  "PWF",
+  'WYSLANIE',
+  'AKCEPTACJA',
+  'WYKONANIE',
+  'PROTOKOL_WYSLANY',
+  'ODBIOR_PRAC',
+  'PWF',
 ] as const;
+type StepKey = typeof STEP_ORDER[number];
 
-type Step = typeof STEP_ORDER[number];
-
-const STEP_LABEL: Record<Step, string> = {
+const STEP_LABEL: Record<StepKey, string> = {
   WYSLANIE: "Data wysłania",
-  AKCEPTACJA_ZLECENIE: "Data akceptacji",
+  AKCEPTACJA: "Data akceptacji",
   WYKONANIE: "Data wykonania",
   PROTOKOL_WYSLANY: "Data protokołu",
   ODBIOR_PRAC: "Data odbioru prac",
@@ -37,11 +38,18 @@ function normalizeDate(v: any): string {
   return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
 }
 
-function parseMilestones(data: any): Record<string, string> {
-  const out: Record<string, string> = {};
+function parseMilestones(data: any): Record<StepKey, string> {
+  const out = {} as Record<StepKey, string>;
   if (Array.isArray(data?.items)) {
     for (const it of data.items) {
-      const step = it?.step || it?.name || it?.code;
+      let step = it?.step || it?.name || it?.code;
+      // Normalizacja legacy: zamień wszelkie warianty na "AKCEPTACJA"
+      if (
+        typeof step === "string" &&
+        ["AKCEPTACJA_ZLECENIE", "AKCEPTACJA ZLECENIE", "AKCEPTACJA-ZLECENIE"].includes(step.trim().toUpperCase())
+      ) {
+        step = "AKCEPTACJA";
+      }
       const when =
         it?.occurredAt ??
         it?.occurred_at ??
@@ -49,7 +57,7 @@ function parseMilestones(data: any): Record<string, string> {
         it?.occurred ??
         it?.at ??
         "";
-      if (step) out[step] = normalizeDate(when);
+      if (step && STEP_ORDER.includes(step)) out[step as StepKey] = normalizeDate(when);
     }
     return out;
   }
@@ -64,17 +72,26 @@ export default function EditDates({ id, initialDates = {} }: Props) {
   // miękka blokada
   const { isCancelled } = useCancelStatus(String(id));
 
+  const router = useRouter();
+
   const initialNorm = useMemo(() => {
-    const r: Record<string, string> = {};
+    const r: Record<StepKey, string> = {
+      WYSLANIE: "",
+      AKCEPTACJA: "",
+      WYKONANIE: "",
+      PROTOKOL_WYSLANY: "",
+      ODBIOR_PRAC: "",
+      PWF: "",
+    };
     for (const k of STEP_ORDER) r[k] = normalizeDate(initialDates[k]);
     return r;
   }, [initialDates]);
 
-  const [dates, setDates] = useState<Record<string, string>>(initialNorm);
-  const [saved, setSaved] = useState<Record<string, string>>(initialNorm);
+  const [values, setValues] = React.useState<Record<StepKey, string>>(initialNorm);
+  const [saved, setSaved] = React.useState<Record<StepKey, string>>(initialNorm);
 
   const dirtyKeys = STEP_ORDER.filter(
-    (k) => (dates[k] || "") !== (saved[k] || "")
+    (k) => (values[k] || "") !== (saved[k] || "")
   );
   const anyDirty = dirtyKeys.length > 0;
 
@@ -89,10 +106,23 @@ export default function EditDates({ id, initialDates = {} }: Props) {
       });
       if (!res.ok) return;
       const data = await res.json();
-      const parsed = parseMilestones(data);
-      setDates(parsed);
-      setSaved(parsed);
-    } catch {}
+      // mapuj step -> occurredAt
+      const nextValues: Record<StepKey, string> = {
+        WYSLANIE: "",
+        AKCEPTACJA: "",
+        WYKONANIE: "",
+        PROTOKOL_WYSLANY: "",
+        ODBIOR_PRAC: "",
+        PWF: "",
+      };
+      for (const it of Array.isArray(data?.items) ? data.items : []) {
+        if (it?.step && it?.occurredAt && (nextValues as any)[it.step] !== undefined) {
+          (nextValues as any)[it.step] = String(it.occurredAt);
+        }
+      }
+      setValues(nextValues);
+      setSaved(nextValues);
+    } catch { }
   }
   useEffect(() => {
     refetch();
@@ -100,29 +130,48 @@ export default function EditDates({ id, initialDates = {} }: Props) {
 
   function minFor(idx: number) {
     const prevKey = STEP_ORDER[idx - 1];
-    return idx > 0 && dates[prevKey] ? dates[prevKey] : undefined;
+    return idx > 0 && values[prevKey] ? values[prevKey] : undefined;
   }
-  function enabledFor(idx: number) {
-    return idx === 0 ? true : Boolean(dates[STEP_ORDER[idx - 1]]);
-  }
+
+  // Funkcja do wyliczania disabled dla każdego kroku
+  const isDisabled = (k: StepKey): boolean => {
+    switch (k) {
+      case "WYSLANIE":
+        return false;
+      case "AKCEPTACJA":
+        return !(values["WYSLANIE"]?.length > 0);
+      case "WYKONANIE":
+        return !(values["AKCEPTACJA"]?.length > 0);
+      case "PROTOKOL_WYSLANY":
+        return false;
+      case "ODBIOR_PRAC":
+        return !(values["PROTOKOL_WYSLANY"]?.length > 0);
+      case "PWF":
+        return !(values["ODBIOR_PRAC"]?.length > 0);
+      default:
+        return false;
+    }
+  };
 
   async function saveDates() {
     try {
       if (!anyDirty || saving) return;
       setSaving(true);
 
-      const flatPayload: Record<string, string | null> = {};
-      const items: Array<{ step: string; occurredAt: string }> = [];
-      for (const k of STEP_ORDER) {
-        const v = dates[k];
-        flatPayload[k] = v ? v : null;
-        if (v) items.push({ step: k, occurredAt: v });
-      }
+      const payload = {
+        replace: true,
+        items: STEP_ORDER.map((step) => ({
+          step,
+          occurredAt: values[step] || '', // '' => usuń, YYYY-MM-DD => ustaw
+        })),
+      };
+      console.log('[editDates] PUT payload:', payload);
 
       const res = await fetch(`/api/offers/${id}/milestones`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...flatPayload, items, replace: true }),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: 'no-store',
       });
 
       if (!res.ok) {
@@ -130,10 +179,9 @@ export default function EditDates({ id, initialDates = {} }: Props) {
         throw new Error(t || `HTTP ${res.status}`);
       }
 
+      // Po zapisie pobierz świeże dane i nadpisz stan formularza
       await refetch();
-      window.dispatchEvent(
-        new CustomEvent("offer-dates-saved", { detail: { offerId: id } })
-      );
+      router.refresh();
 
       setMsg({ type: "success", text: "Zapisano daty etapów." });
       setTimeout(() => setMsg(null), 1500);
@@ -151,9 +199,8 @@ export default function EditDates({ id, initialDates = {} }: Props) {
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${
-            msg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
-          }`}
+          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${msg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+            }`}
         >
           {msg.text}
         </div>
@@ -163,38 +210,34 @@ export default function EditDates({ id, initialDates = {} }: Props) {
       <SoftBlock disabled={isCancelled}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {STEP_ORDER.map((step, idx) => {
-            const dirty = (dates[step] || "") !== (saved[step] || "");
-            const enabled = enabledFor(idx);
+            const dirty = (values[step] || "") !== (saved[step] || "");
             const min = minFor(idx);
-
             return (
               <label key={step} className="grid gap-1">
                 <span
-                  className={`text-sm ${
-                    dirty ? "text-amber-700 font-medium" : "text-gray-700"
-                  } ${!enabled ? "opacity-70" : ""}`}
+                  className={`text-sm ${dirty ? "text-amber-700 font-medium" : "text-gray-700"
+                    } ${isDisabled(step) ? "opacity-70" : ""}`}
                 >
-                  {STEP_LABEL[step as Step]}
+                  {STEP_LABEL[step as StepKey]}
                 </span>
                 <input
                   type="date"
-                  className={`border rounded px-2 py-1 ${
-                    dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  } ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
-                  value={dates[step] || ""}
+                  className={`border rounded px-2 py-1 ${dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
+                    } ${isDisabled(step) ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
+                  value={values[step] || ""}
                   onChange={(e) =>
-                    setDates((m) => ({ ...m, [step]: e.target.value }))
+                    setValues((m) => ({ ...m, [step]: e.target.value }))
                   }
-                  disabled={!enabled || saving}
+                  disabled={isDisabled(step) || saving}
                   min={min}
                   title={
-                    enabled ? "" : "Najpierw uzupełnij wcześniejsze etapy"
+                    isDisabled(step) ? "Najpierw uzupełnij wcześniejsze etapy" : ""
                   }
                 />
-                {dates[step] && (
+                {values[step] && (
                   <button
                     type="button"
-                    onClick={() => setDates((m) => ({ ...m, [step]: "" }))}
+                    onClick={() => setValues((m) => ({ ...m, [step]: "" }))}
                     className="justify-self-start text-xs text-gray-600 hover:text-gray-800 underline"
                     disabled={saving}
                   >

@@ -6,6 +6,7 @@ import InfoPanel from "../infoPanel";
 import StatusPanel from "../statusPanel";
 // import EditDates from "../editDates";
 import StickyBannerClient from "../stickyBannerClient"; // ⬅️ DODANE
+import { notFound } from 'next/navigation';
 
 export const dynamic = "force-dynamic";
 
@@ -24,43 +25,45 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
 
   const offer = await prisma.offer.findUnique({
     where: { id },
-    include: { client: true, milestones: true },
+    select: {
+      id: true,
+      offerNo: true,
+      title: true,
+      valueNet: true,
+      currency: true,
+      costsSumNet: true,
+      meta: true,
+      client: { select: { id: true, name: true, street: true, postcode: true, city: true, nip: true, meta: true } },
+      milestones: { select: { id: true, step: true, occurredAt: true } },
+      author: { select: { initials: true } },
+    },
   });
+  if (!offer) return notFound();
+  const meta =
+    offer.meta && typeof offer.meta === 'object' && !Array.isArray(offer.meta)
+      ? (offer.meta as any)
+      : {};
 
-  if (!offer) {
-    return (
-      <main className="px-4 md:px-5 pt-2 md:pt-2 pb-4">
-        <div className="rounded border border-amber-300 bg-amber-50 text-amber-800 p-3 space-y-2">
-          <div>
-            Nie znaleziono oferty o <b>id</b>: <code>{id}</code>
-          </div>
-          <div>
-            Wejdź na <a className="underline" href="/offers">/offers</a> i kliknij <b>Edytuj</b> przy istniejącej pozycji.
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  // Mapowanie istniejących dat do YYYY-MM-DD
-  const dates: Record<string, string> = {};
-  for (const m of offer.milestones) {
-    if (!m.occurredAt) continue;
-    const d = new Date(m.occurredAt);
-    const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 10);
-    dates[m.step] = iso;
-  }
-
-  const fields = {
+  const initialData = {
     offerNo: offer.offerNo ?? "",
     title: offer.title ?? "",
-    authorInitials: offer.authorInitials ?? "",
-    vendorOrderNo: offer.vendorOrderNo ?? "",
-    contractor: offer.contractor ?? "",
-    valueNet: offer.valueNet != null ? String(offer.valueNet) : "",
-    wartoscKosztow: offer.wartoscKosztow != null ? String(offer.wartoscKosztow) : "",
+    authorInitials: offer.author?.initials ?? "",
+    vendorOrderNo: String(meta.vendorOrderNo ?? ""),
+    contractor: String(meta.contractor ?? ""),
+    valueNet: String(offer.valueNet ?? 0),
+    wartoscKosztow: String(offer.costsSumNet ?? 0),
+  };
+
+  // Mapowanie istniejących dat do YYYY-MM-DD (po kluczach enuma)
+  const toYMD = (d?: Date | string | null) =>
+    d ? new Date(d).toISOString().slice(0, 10) : '';
+  const initialDates = {
+    WYSLANIE:         toYMD(offer.milestones.find(m => m.step === 'WYSLANIE')?.occurredAt),
+    AKCEPTACJA:       toYMD(offer.milestones.find(m => m.step === 'AKCEPTACJA')?.occurredAt),
+    WYKONANIE:        toYMD(offer.milestones.find(m => m.step === 'WYKONANIE')?.occurredAt),
+    PROTOKOL_WYSLANY: toYMD(offer.milestones.find(m => m.step === 'PROTOKOL_WYSLANY')?.occurredAt),
+    ODBIOR_PRAC:      toYMD(offer.milestones.find(m => m.step === 'ODBIOR_PRAC')?.occurredAt),
+    PWF:              toYMD(offer.milestones.find(m => m.step === 'PWF')?.occurredAt),
   };
 
   return (
@@ -73,9 +76,8 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
         <div className="w-full md:w-1/2">
           <EditPanel
             id={offer.id}
-            initialFields={fields}
-            initialDates={dates}
-            initialClient={{ id: offer.clientId, name: offer.client?.name ?? "" }}
+            initialFields={initialData}
+            initialDates={initialDates}
           />
         </div>
 

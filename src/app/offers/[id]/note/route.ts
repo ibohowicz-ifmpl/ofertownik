@@ -1,21 +1,34 @@
-// src/app/api/offers/[id]/note/route.ts
-import { prisma } from "@/lib/prisma";
+// src/app/offers/[id]/note/route.ts
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getParamId, metaGet, metaPatch } from '@/lib/api-helpers';
 
-export const dynamic = "force-dynamic";
-
+// GET: pobiera notatkę z Offer.meta.note
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  const offer = await prisma.offer.findUnique({ where: { id }, select: { note: true } });
-  return Response.json({ note: offer?.note ?? "" }, { headers: { "content-type": "application/json; charset=utf-8" } });
+  const id = await getParamId(ctx);
+
+  const row = await prisma.offer.findUnique({
+    where: { id },
+    select: { meta: true },
+  });
+
+  const note = metaGet<string>(row?.meta ?? null, 'note', '');
+  return NextResponse.json({ note });
 }
 
-export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  let body: any = {};
-  try {
-    body = await req.json();
-  } catch {}
-  const note = typeof body?.note === "string" ? body.note : "";
-  await prisma.offer.update({ where: { id }, data: { note } });
-  return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json; charset=utf-8" } });
+// POST: zapisuje notatkę do Offer.meta.note
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const id = await getParamId(ctx);
+  const body = await req.json().catch(() => ({}));
+  const note: string = String(body?.note ?? '');
+
+  const cur = await prisma.offer.findUnique({
+    where: { id },
+    select: { meta: true },
+  });
+
+  const nextMeta = metaPatch(cur?.meta ?? null, { note });
+  await prisma.offer.update({ where: { id }, data: { meta: nextMeta } });
+
+  return NextResponse.json({ ok: true });
 }
