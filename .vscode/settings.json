@@ -1,24 +1,60 @@
 {
+  // --- Formatowanie ---
   "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "modificationsIfAvailable",
+  "editor.formatOnType": false,
+
+  // Prettier jako jedyny formatter
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[javascriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "prettier.requireConfig": true,
+
+  // ESLint — tylko fixy na zapis (bez formatowania)
+  "eslint.format.enable": false,
+  "eslint.run": "onSave",
+  "eslint.codeActionsOnSave.mode": "problems",
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
   },
-  // ESLint – włącz flat config (ESLint 9)
-  "eslint.experimental.useFlatConfig": true,
-  // Walidacje – możesz zostawić JS/TS; jeśli projekt jest tylko TS, JS nie przeszkadza
-  "eslint.validate": [
-    "javascript",
-    "javascriptreact",
-    "typescript",
-    "typescriptreact"
-  ],
-  // Prisma – formatter rozszerzenia Prisma
-  "[prisma]": {
-    "editor.defaultFormatter": "Prisma.prisma"
+
+  // --- TypeScript: mniej pracy w tle ---
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.tsserver.maxTsServerMemory": 4096,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.tsserver.watchOptions": {
+    "watchFile": "priorityPollingInterval",
+    "watchDirectory": "dynamicPriorityPolling",
+    "fallbackPolling": "dynamicPriorityPolling"
   },
-  // Pliki – porządek końców linii i ostatnia linia
-  "files.eol": "\n",
-  "files.insertFinalNewline": true,
-  // TypeScript – więcej pamięci dla tsserver
-  "typescript.tsserver.maxTsServerMemory": 4096
+  "typescript.referencesCodeLens.enabled": false,
+
+  // --- Ograniczenie szumu / watcherów ---
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.pnpm/**": true,
+    "**/.next/**": true,
+    "**/dist/**": true,
+    "**/build/**": true
+  },
+  "search.exclude": {
+    "**/node_modules/**": true,
+    "**/.pnpm/**": true,
+    "**/.next/**": true,
+    "**/dist/**": true,
+    "**/build/**": true
+  },
+
+  // --- Mniej otwartych kart = mniej analiz ---
+  "workbench.editor.limit.enabled": true,
+  "workbench.editor.limit.perEditorGroup": true,
+  "workbench.editor.limit.value": 10,
+
+  // --- SonarLint mniej agresywnie (albo wyłącz rozszerzenie) ---
+  "sonarlint.connectedMode.enabled": false,
+  "sonarlint.disableTelemetry": true,
+  "sonarlint.disableSymbolsHighlighting": true
 }
