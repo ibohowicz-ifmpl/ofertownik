@@ -8,27 +8,29 @@
     "start": "next start -p 3000",
     "start:preview": "next start -p 3001",
     "lint": "eslint",
-    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit"
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "prune": "ts-prune -p tsconfig.json",
+    "depcheck": "depcheck --skip-missing true"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
     "next": "15.5.3",
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "xlsx": "^0.18.5"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^18.2.75",
     "@types/react-dom": "^18.2.25",
+    "depcheck": "^1.4.7",
     "eslint": "^9",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-unused-imports": "^4.2.0",
+    "prettier-plugin-tailwindcss": "^0.6.14",
     "prisma": "^6.16.2",
     "tailwindcss": "^4",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.20.5",
+    "ts-prune": "^0.10.3",
     "typescript": "5.6.3",
     "typescript-eslint": "^8.45.0"
   },

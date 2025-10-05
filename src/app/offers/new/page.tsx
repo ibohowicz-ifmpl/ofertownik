@@ -86,33 +86,9 @@ export default function NewOfferPage() {
   const refValueNet = useRef<HTMLInputElement>(null);
 
   // baseline dla „dirty” – wartości początkowe (puste)
-  const baseline = useMemo(
-    () => ({
-      offerNo: "",
-      title: "",
-      authorInitials: "",
-      contractor: "",
-      valueNet: "",
-      clientId: "",
-      clientName: "",
-      objectCode: "089",
-      offerDate,
-      seq: "01",
-    }),
-    []
-  );
 
-  const dirty =
-    offerNo !== baseline.offerNo || // auto-generate makes this true; nie używamy do koloru przycisku
-    title !== baseline.title ||
-    authorInitials !== baseline.authorInitials ||
-    contractor !== baseline.contractor ||
-    valueNet !== baseline.valueNet ||
-    clientId !== baseline.clientId ||
-    (clientId === "__NEW__" ? clientName !== baseline.clientName : false) ||
-    objectCode !== baseline.objectCode ||
-    offerDate !== baseline.offerDate ||
-    seq !== baseline.seq;
+
+
 
   // --- walidacja: nr oferty (z generatora), tytuł, odbiorca, kwota > 0 ---
   const numNow = toNumber(valueNet || "");
@@ -204,8 +180,7 @@ export default function NewOfferPage() {
     hasClient &&
     valueNetValid;
 
-  // helper do klasy podświetlenia (zawsze pokazujemy na żółto, jeśli pole jest niepoprawne)
-  const reqClass = (bad: boolean) => (bad ? "ring-1 ring-yellow-400 bg-yellow-50" : "");
+
 
   function FieldHint({
     bad, ok, textBad, textOk, error

@@ -1,4 +1,4 @@
-export type OfferSavedDetail = { offerId: string; sumNet?: number };
+export type OfferSavedDetail = { offerId: string; sumNet?: number | undefined };
 
 export const emit = {
   dataSaved: (offerId: string) =>

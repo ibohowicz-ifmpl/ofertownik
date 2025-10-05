@@ -1,197 +1,168 @@
 // src/app/offers/[id]/editDates.tsx
 "use client";
 
-import React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useCancelStatus, SoftBlock } from "./cancelGuard";
-import { useRouter } from 'next/navigation';
+import { type MilestoneKey } from "@/lib/milestones";
 
-type Props = {
-  id: string;
-  initialDates?: Record<string, string | null | undefined>;
-};
-
+// Kroki – kanonicznie
 const STEP_ORDER = [
-  'WYSLANIE',
-  'AKCEPTACJA',
-  'WYKONANIE',
-  'PROTOKOL_WYSLANY',
-  'ODBIOR_PRAC',
-  'PWF',
+  "WYSLANIE",
+  "AKCEPTACJA",
+  "WYKONANIE",
+  "PROTOKOL_WYSLANY",
+  "ODBIOR_PRAC",
+  "PWF",
 ] as const;
-type StepKey = typeof STEP_ORDER[number];
+type Step = typeof STEP_ORDER[number];
 
-const STEP_LABEL: Record<StepKey, string> = {
+const STEP_LABEL: Record<Step, string> = {
   WYSLANIE: "Data wysłania",
   AKCEPTACJA: "Data akceptacji",
   WYKONANIE: "Data wykonania",
-  PROTOKOL_WYSLANY: "Data protokołu",
-  ODBIOR_PRAC: "Data odbioru prac",
-  PWF: "Data PWF",
+  PROTOKOL_WYSLANY: "Protokół wysłany",
+  ODBIOR_PRAC: "Odbiór prac",
+  PWF: "PWF",
 };
 
-function normalizeDate(v: any): string {
-  if (!v) return "";
-  const s = String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-}
+// Alias legacy → kanon
+const LEGACY_ALIAS: Record<string, MilestoneKey> = { AKCEPTACJA_ZLECENIE: "AKCEPTACJA" };
 
-function parseMilestones(data: any): Record<StepKey, string> {
-  const out = {} as Record<StepKey, string>;
-  if (Array.isArray(data?.items)) {
-    for (const it of data.items) {
-      let step = it?.step || it?.name || it?.code;
-      // Normalizacja legacy: zamień wszelkie warianty na "AKCEPTACJA"
-      if (
-        typeof step === "string" &&
-        ["AKCEPTACJA_ZLECENIE", "AKCEPTACJA ZLECENIE", "AKCEPTACJA-ZLECENIE"].includes(step.trim().toUpperCase())
-      ) {
-        step = "AKCEPTACJA";
-      }
-      const when =
-        it?.occurredAt ??
-        it?.occurred_at ??
-        it?.date ??
-        it?.occurred ??
-        it?.at ??
-        "";
-      if (step && STEP_ORDER.includes(step)) out[step as StepKey] = normalizeDate(when);
-    }
-    return out;
-  }
-  if (data && typeof data === "object") {
-    for (const k of STEP_ORDER) out[k] = normalizeDate((data as any)[k]);
-    return out;
+// Typy
+type InitialRow = { step: MilestoneKey; occurredAt: string };
+type EditDatesProps = {
+  offerId: string;
+  initialRows?: InitialRow[];
+};
+
+// Helper: [{step, occurredAt}] -> Record<Step, string>
+function rowsToMap(
+  rows: { step: string; occurredAt: string | Date | null | undefined }[] | undefined
+): Record<Step, string> {
+  const out = {} as Record<Step, string>;
+  for (const step of STEP_ORDER) out[step] = "";
+  for (const r of rows ?? []) {
+    const step = (LEGACY_ALIAS[r.step as string] ?? r.step) as Step;
+    const v = r.occurredAt
+      ? (typeof r.occurredAt === "string"
+        ? r.occurredAt.slice(0, 10)
+        : new Date(r.occurredAt).toISOString().slice(0, 10))
+      : "";
+    if (STEP_ORDER.includes(step)) out[step] = v;
   }
   return out;
 }
 
-export default function EditDates({ id, initialDates = {} }: Props) {
-  // miękka blokada
-  const { isCancelled } = useCancelStatus(String(id));
+export default function EditDates({ offerId, initialRows }: EditDatesProps) {
+  const { isCancelled } = useCancelStatus(String(offerId));
 
-  const router = useRouter();
-
-  const initialNorm = useMemo(() => {
-    const r: Record<StepKey, string> = {
-      WYSLANIE: "",
-      AKCEPTACJA: "",
-      WYKONANIE: "",
-      PROTOKOL_WYSLANY: "",
-      ODBIOR_PRAC: "",
-      PWF: "",
-    };
-    for (const k of STEP_ORDER) r[k] = normalizeDate(initialDates[k]);
-    return r;
-  }, [initialDates]);
-
-  const [values, setValues] = React.useState<Record<StepKey, string>>(initialNorm);
-  const [saved, setSaved] = React.useState<Record<StepKey, string>>(initialNorm);
-
-  const dirtyKeys = STEP_ORDER.filter(
-    (k) => (values[k] || "") !== (saved[k] || "")
+  // Stan: zawsze Record<Step, string>
+  const [dates, setDates] = useState<Record<Step, string>>(() =>
+    rowsToMap(initialRows)
   );
-  const anyDirty = dirtyKeys.length > 0;
-
+  const [saved, setSaved] = useState<Record<Step, string>>(() =>
+    rowsToMap(initialRows)
+  );
   const [msg, setMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
 
-  async function refetch() {
+  // SSR preload tylko raz na starcie
+  useEffect(() => {
+    if (initialRows && initialRows.length > 0) {
+      const map = rowsToMap(initialRows);
+      setDates(map);
+      setSaved(map);
+    }
+  }, [initialRows]);
+
+  // Refetch – NO-CACHE, zawsze nadpisuje local state
+  const refetch = useCallback(async () => {
+    const res = await fetch(`/api/offers/${offerId}/milestones`, { cache: 'no-store' });
+    const data = await res.json();
+    // API: { ok, items, view }
+    const map = rowsToMap(data.items);
+    setDates(map);
+    setSaved(map);
+    setErrors([]);
+  }, [offerId]);
+
+  // Zapis
+  const handleSaveClick: React.MouseEventHandler<HTMLButtonElement> = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErrors([]);
     try {
-      const bust = `t=${Date.now()}`;
-      const res = await fetch(`/api/offers/${id}/milestones?${bust}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      // mapuj step -> occurredAt
-      const nextValues: Record<StepKey, string> = {
-        WYSLANIE: "",
-        AKCEPTACJA: "",
-        WYKONANIE: "",
-        PROTOKOL_WYSLANY: "",
-        ODBIOR_PRAC: "",
-        PWF: "",
-      };
-      for (const it of Array.isArray(data?.items) ? data.items : []) {
-        if (it?.step && it?.occurredAt && (nextValues as any)[it.step] !== undefined) {
-          (nextValues as any)[it.step] = String(it.occurredAt);
+      // Walidacja chronologii (prosta: daty rosnące)
+      let prev = "";
+      for (const step of STEP_ORDER) {
+        const v = dates[step];
+        if (v && prev && v < prev) {
+          setErrors([`Chronologia naruszona: ${STEP_LABEL[step]} (${v}) < poprzedni krok (${prev})`]);
+          setSaving(false);
+          return;
+        }
+        if (v) prev = v;
+      }
+
+      // Wymuś uzupełnienie WYSLANIE przed kolejnymi krokami
+      if (!dates.WYSLANIE && STEP_ORDER.some((k, i) => i > 0 && dates[k])) {
+        setErrors(["Najpierw uzupełnij Wysłanie."]);
+        setSaving(false);
+        return;
+      }
+
+      // --- NOWA WALIDACJA: Nie pozwól usuwać daty ze środka ---
+      // Jeśli jakakolwiek data jest pusta, a późniejszy krok ma datę, to błąd
+      let foundEmpty = false;
+      for (let i = 0; i < STEP_ORDER.length; ++i) {
+        const k = STEP_ORDER[i];
+        if (!dates[k]) foundEmpty = true;
+        if (foundEmpty) {
+          // jeśli po pierwszym pustym znajdziemy jakąkolwiek datę dalej, to błąd
+          for (let j = i + 1; j < STEP_ORDER.length; ++j) {
+            if (dates[STEP_ORDER[j]]) {
+              setErrors(["Nie można usuwać daty ze środka – najpierw usuń późniejsze etapy."]);
+              setSaving(false);
+              return;
+            }
+          }
+          break;
         }
       }
-      setValues(nextValues);
-      setSaved(nextValues);
-    } catch { }
-  }
-  useEffect(() => {
-    refetch();
-  }, [id]);
 
-  function minFor(idx: number) {
-    const prevKey = STEP_ORDER[idx - 1];
-    return idx > 0 && values[prevKey] ? values[prevKey] : undefined;
-  }
+      // Przygotuj payload
+      const items = STEP_ORDER
+        .map((k) => ({ step: k, occurredAt: dates[k] }))
+        .filter((it) => !!it.occurredAt);
 
-  // Funkcja do wyliczania disabled dla każdego kroku
-  const isDisabled = (k: StepKey): boolean => {
-    switch (k) {
-      case "WYSLANIE":
-        return false;
-      case "AKCEPTACJA":
-        return !(values["WYSLANIE"]?.length > 0);
-      case "WYKONANIE":
-        return !(values["AKCEPTACJA"]?.length > 0);
-      case "PROTOKOL_WYSLANY":
-        return false;
-      case "ODBIOR_PRAC":
-        return !(values["PROTOKOL_WYSLANY"]?.length > 0);
-      case "PWF":
-        return !(values["ODBIOR_PRAC"]?.length > 0);
-      default:
-        return false;
-    }
-  };
-
-  async function saveDates() {
-    try {
-      if (!anyDirty || saving) return;
-      setSaving(true);
-
-      const payload = {
-        replace: true,
-        items: STEP_ORDER.map((step) => ({
-          step,
-          occurredAt: values[step] || '', // '' => usuń, YYYY-MM-DD => ustaw
-        })),
-      };
-      console.log('[editDates] PUT payload:', payload);
-
-      const res = await fetch(`/api/offers/${id}/milestones`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+      await fetch(`/api/offers/${offerId}/milestones`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ replace: true, items }),
         cache: 'no-store',
+      }).then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setErrors(data.errors || ["Błąd zapisu"]);
+          throw new Error("API error");
+        }
       });
 
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || `HTTP ${res.status}`);
-      }
-
-      // Po zapisie pobierz świeże dane i nadpisz stan formularza
       await refetch();
-      router.refresh();
-
-      setMsg({ type: "success", text: "Zapisano daty etapów." });
-      setTimeout(() => setMsg(null), 1500);
-    } catch (e: any) {
-      setMsg({ type: "error", text: e?.message || "Błąd zapisu dat." });
-      setTimeout(() => setMsg(null), 3000);
+      window.dispatchEvent(new CustomEvent("offer-dates-saved", { detail: { offerId } }));
+      setMsg({ type: "success", text: "✓ Zapisano" });
+      setTimeout(() => setMsg(null), 1200);
+    } catch (e) {
+      if (!errors.length) setMsg({ type: "error", text: (e as Error).message ?? "Nie udało się zapisać dat." });
     } finally {
       setSaving(false);
     }
-  }
+  };
+
+  // Dirty detection
+  const dirtyKeys = STEP_ORDER.filter((k) => (dates[k] || "") !== (saved[k] || ""));
+  const anyDirty = dirtyKeys.length > 0;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
@@ -199,51 +170,48 @@ export default function EditDates({ id, initialDates = {} }: Props) {
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${msg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
-            }`}
+          className={`fixed bottom-4 right-4 z-50 rounded px-3 py-2 text-sm shadow ${msg.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}
         >
           {msg.text}
         </div>
       )}
 
-      {/* bez lokalnego CancelBanner – sticky jest w page.tsx */}
+      {errors.length > 0 && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-2">
+          {errors.map((e, i) => (
+            <div key={i}>• {e}</div>
+          ))}
+        </div>
+      )}
+
       <SoftBlock disabled={isCancelled}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {STEP_ORDER.map((step, idx) => {
-            const dirty = (values[step] || "") !== (saved[step] || "");
-            const min = minFor(idx);
+            const value = dates[step] ?? "";
+
+            // min = data poprzedniego ustawionego kroku
+            let prevDate = "";
+            for (let i = idx - 1; i >= 0; --i) {
+              const d = dates[STEP_ORDER[i]];
+              if (d && d.trim()) {
+                prevDate = d;
+                break;
+              }
+            }
+
+            const enabled = (idx === 0 ? true : Boolean((dates[STEP_ORDER[idx - 1]] ?? "").trim())) && !saving;
+
             return (
               <label key={step} className="grid gap-1">
-                <span
-                  className={`text-sm ${dirty ? "text-amber-700 font-medium" : "text-gray-700"
-                    } ${isDisabled(step) ? "opacity-70" : ""}`}
-                >
-                  {STEP_LABEL[step as StepKey]}
-                </span>
+                <span className="text-sm text-gray-700">{STEP_LABEL[step]}</span>
                 <input
                   type="date"
-                  className={`border rounded px-2 py-1 ${dirty ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                    } ${isDisabled(step) ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
-                  value={values[step] || ""}
-                  onChange={(e) =>
-                    setValues((m) => ({ ...m, [step]: e.target.value }))
-                  }
-                  disabled={isDisabled(step) || saving}
-                  min={min}
-                  title={
-                    isDisabled(step) ? "Najpierw uzupełnij wcześniejsze etapy" : ""
-                  }
+                  value={value}
+                  min={prevDate}
+                  onChange={(e) => setDates((m) => ({ ...m, [step]: e.target.value }))}
+                  className={`border rounded px-2 py-1 ${saving ? "opacity-60" : ""} ${enabled ? "" : "bg-gray-50 text-gray-500 cursor-not-allowed"}`}
+                  disabled={!enabled}
                 />
-                {values[step] && (
-                  <button
-                    type="button"
-                    onClick={() => setValues((m) => ({ ...m, [step]: "" }))}
-                    className="justify-self-start text-xs text-gray-600 hover:text-gray-800 underline"
-                    disabled={saving}
-                  >
-                    Wyczyść
-                  </button>
-                )}
               </label>
             );
           })}
@@ -254,7 +222,8 @@ export default function EditDates({ id, initialDates = {} }: Props) {
             {anyDirty ? `Niezapisane daty: ${dirtyKeys.length}` : ""}
           </div>
           <button
-            onClick={saveDates}
+            type="button"
+            onClick={handleSaveClick}
             disabled={!anyDirty || saving}
             aria-busy={saving}
             className={
@@ -264,13 +233,26 @@ export default function EditDates({ id, initialDates = {} }: Props) {
                 : "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50")
             }
             title={
-              anyDirty ? "Zapisz zmienione daty" : "Brak zmian do zapisania"
+              saving
+                ? "Zapisywanie…"
+                : anyDirty
+                  ? "Zapisz zmienione daty"
+                  : "Brak zmian do zapisania"
             }
           >
-            {saving ? "Zapisywanie…" : "Zapisz daty"}
+            {saving ? "Zapisywanie…" : msg?.type === "success" ? "✓ Zapisano" : "Zapisz daty"}
           </button>
         </div>
       </SoftBlock>
     </div>
   );
 }
+
+/*
+
+## Events
+
+- `offer-dates-saved` – emitowane po każdej zmianie dat etapów (milestones), np. po zapisie lub usunięciu daty.
+  Używane do automatycznego odświeżania panelu statusu i innych komponentów zależnych od dat oferty.
+
+*/

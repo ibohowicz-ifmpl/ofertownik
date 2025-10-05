@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useCancelStatus } from "./cancelGuard";
+import { useRouter } from "next/navigation";
 
 type Step =
   | "WYSLANIE"
@@ -47,12 +48,26 @@ function normalizeDateInput(v: any): string | "" {
   }
 }
 
+function normStep(raw: any): Step | null {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (!s) return null;
+  if (s === "AKCEPTACJA") return "AKCEPTACJA_ZLECENIE"; // ← mapowanie z API
+  if (
+    (["WYSLANIE", "AKCEPTACJA_ZLECENIE", "WYKONANIE", "PROTOKOL_WYSLANY", "ODBIOR_PRAC", "PWF"] as const).includes(
+      s as any
+    )
+  ) {
+    return s as Step;
+  }
+  return null;
+}
+
 function toDatesRecord(resp: MilestonesResponse | null | undefined): Record<string, string> {
   if (!resp) return {};
   if (Array.isArray((resp as any).items)) {
     const out: Record<string, string> = {};
     for (const it of (resp as any).items as Array<any>) {
-      const step = it?.step || it?.name || it?.code;
+      const step = normStep(it?.step || it?.name || it?.code);
       const when = it?.occurredAt ?? it?.occurred_at ?? it?.date ?? it?.occurred ?? it?.at;
       if (step) out[step] = normalizeDateInput(when);
     }
@@ -61,7 +76,7 @@ function toDatesRecord(resp: MilestonesResponse | null | undefined): Record<stri
   if (Array.isArray((resp as any).milestones)) {
     const out: Record<string, string> = {};
     for (const it of (resp as any).milestones as Array<any>) {
-      const step = it?.step || it?.name || it?.code;
+      const step = normStep(it?.step || it?.name || it?.code);
       const when = it?.occurredAt ?? it?.occurred_at ?? it?.date ?? it?.occurred ?? it?.at;
       if (step) out[step] = normalizeDateInput(when);
     }
@@ -69,7 +84,15 @@ function toDatesRecord(resp: MilestonesResponse | null | undefined): Record<stri
   }
   if (typeof resp === "object") {
     const out: Record<string, string> = {};
-    for (const k of STEP_ORDER) out[k] = normalizeDateInput((resp as any)[k]);
+    for (const k of STEP_ORDER) {
+      const mapped = normStep(k);
+      const key = mapped ?? k;
+      out[key] = normalizeDateInput((resp as any)[k]);
+    }
+    // plus wartości dla ewentualnego klucza AKCEPTACJA z obiektu:
+    if ((resp as any)["AKCEPTACJA"]) {
+      out["AKCEPTACJA_ZLECENIE"] = normalizeDateInput((resp as any)["AKCEPTACJA"]);
+    }
     return out;
   }
   return {};
@@ -78,6 +101,7 @@ function toDatesRecord(resp: MilestonesResponse | null | undefined): Record<stri
 export default function StatusPanel({ offerId }: { offerId: string }) {
   const [dates, setDates] = useState<Record<string, string>>({});
   const { isCancelled } = useCancelStatus(offerId);
+  const router = useRouter();
 
   // --- lokalny modal „Powód anulowania” ---
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -91,6 +115,7 @@ export default function StatusPanel({ offerId }: { offerId: string }) {
       if (!r.ok) return;
       const data = await r.json();
       setDates(toDatesRecord(data));
+      console.debug("[StatusPanel] dates =", toDatesRecord(data));
     } catch {
       // ignore
     }
@@ -117,6 +142,14 @@ export default function StatusPanel({ offerId }: { offerId: string }) {
     names.forEach((n) => window.addEventListener(n, handler as EventListener));
     return () => names.forEach((n) => window.removeEventListener(n, handler as EventListener));
   }, [offerId]);
+
+  useEffect(() => {
+    function onDatesSaved() {
+      router.refresh();
+    }
+    window.addEventListener("offer-dates-saved", onDatesSaved);
+    return () => window.removeEventListener("offer-dates-saved", onDatesSaved);
+  }, [router]);
 
   const latestStep: Step | null = useMemo(() => {
     for (let i = STEP_ORDER.length - 1; i >= 0; i--) {

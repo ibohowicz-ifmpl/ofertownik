@@ -1,19 +1,11 @@
-export const revalidate = 0;
 // src/app/offers/page.tsx
 import { prisma } from "@/lib/prisma";
-import OffersTableClient, { type OfferRow } from "./OffersTableClient";
+import OffersTableClient from "./OffersTableClient";
+import type { OfferRow } from "./OffersTableClient";
+import { parseFromApi } from "@/lib/milestones"; // DODAJ import
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = {
-  offerMonth?: string;
-  dir?: "asc" | "desc";
-  step?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  dateDir?: "asc" | "desc";
-  cancelled?: string; // "1" => tryb anulowanych
-};
 
 // ---------- Walidacja parametrów ----------
 function safeMonth(v?: string) {
@@ -27,7 +19,7 @@ function safeDateDir(v?: string): "asc" | "desc" {
 }
 const STEP_LABEL: Record<string, string> = {
   WYSLANIE: "Wysłanie",
-  AKCEPTACJA: "Akceptacja",
+  AKCEPTACJA_ZLECENIE: "Akceptacja",
   WYKONANIE: "Wykonanie",
   PROTOKOL_WYSLANY: "Protokół",
   ODBIOR_PRAC: "Odbiór prac",
@@ -59,19 +51,46 @@ function safeCancelled(v?: string) {
   return v === "1" || v === "true";
 }
 
+const toNum = (v: unknown) => (v == null ? 0 : Number(v));
+const toYMD = (d: unknown) => {
+  if (!d) return '';
+  const t = typeof d === 'string' ? new Date(d) : (d as Date);
+  return Number.isFinite(t.getTime()) ? t.toISOString().slice(0, 10) : '';
+};
+
+
+// Załóżmy sygnaturę server componentu:
 export default async function OffersPage({
   searchParams,
 }: {
-  searchParams: Promise<SearchParams>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const selectedMonth = safeMonth(sp?.offerMonth);
-  const dir = safeDir(sp?.dir);
-  const selStep = safeStep(sp?.step);
-  const selFrom = safeYMD(sp?.dateFrom);
-  const selTo = safeYMD(sp?.dateTo);
-  const dateDir = safeDateDir(sp?.dateDir);
-  const showCancelled = safeCancelled(sp?.cancelled);
+  // WSPÓLNA PACZKA PARAMS DO LINKÓW (zachowujemy obecne filtry)
+  const common = {
+    q: sp.q as string | undefined,
+    step: sp.step as string | undefined,
+    dir: sp.dir as "asc" | "desc" | undefined,
+    dateDir: sp.dateDir as "asc" | "desc" | undefined,
+    from: sp.from as string | undefined,
+    to: sp.to as string | undefined,
+    mpk: sp.mpk as string | undefined,
+    page: sp.page as string | undefined,
+    show: sp.show as string | undefined,
+    offerMonth: sp.offerMonth as string | undefined,
+    dateFrom: sp.dateFrom as string | undefined,
+    dateTo: sp.dateTo as string | undefined,
+    milestone: sp.milestone as string | undefined,
+    status: sp.status as string | undefined,
+  };
+
+  const selectedMonth = safeMonth(sp?.offerMonth as string | undefined);
+  const dir = safeDir(sp?.dir as string | undefined);
+  const selStep = safeStep(sp?.step as string | undefined);
+  const selFrom = safeYMD(sp?.dateFrom as string | undefined);
+  const selTo = safeYMD(sp?.dateTo as string | undefined);
+  const dateDir = safeDateDir(sp?.dateDir as string | undefined);
+  const showCancelled = safeCancelled(sp?.cancelled as string | undefined);
 
   const tableKey = JSON.stringify({ selectedMonth, dir, selStep, selFrom, selTo, dateDir, showCancelled });
 
@@ -114,11 +133,7 @@ export default async function OffersPage({
       // Faza 2: doładuj pełne rekordy Prisma z relacjami
       offers = await prisma.offer.findMany({
         where: { id: { in: ids } },
-        include: {
-          client: true,
-          milestones: { select: { step: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
-          costs: true,
-        },
+        include: { client: true, milestones: true, costs: true },
         // opcjonalnie: posortuj lokalnie wg kolejności 'ids'
       } as any);
       // utrzymaj kolejność wg 'ids':
@@ -148,11 +163,7 @@ export default async function OffersPage({
           }
           : {}),
       },
-      include: {
-        client: true,
-        milestones: { select: { step: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
-        costs: true as any,
-      },
+      include: { client: true, milestones: true, costs: true as any },
       orderBy: showCancelled ? { cancelledAt: "desc" as any } : { offerNo: dir as any },
     } as any);
   }
@@ -209,41 +220,32 @@ export default async function OffersPage({
     });
   }
 
-  // Dane do tabeli (CSR)
-  const findDate = (list: any[], step: string) =>
-    Array.isArray(list) ? (list.find((m) => m.step === step)?.occurredAt ?? null) : null;
-
+  // DTO do tabeli (CSR) - tylko prymitywy i daty w YYYY-MM-DD
   const rows: OfferRow[] = offers.map((o: any) => {
-    const meta = (o.meta && typeof o.meta === 'object' && !Array.isArray(o.meta)) ? (o.meta as any) : {};
+    // Uproszczone: milestones zawsze przez parseFromApi
+    const milestones = parseFromApi(o.milestones ?? []);
     return {
-      ...o,
-      id: String(o.id),
-      offerNo: o.offerNo ?? null,
-      title: o.title ?? null,
-      clientName: o.client?.name ?? null,
-      contractor: meta.contractor ?? null,
-      vendorOrderNo: meta.vendorOrderNo ?? null,
-      valueNet: o.valueNet != null ? Number(o.valueNet) : null,
-      cancelledAt: o.cancelledAt ? new Date(o.cancelledAt).toISOString() : null,
-      milestones: Array.isArray(o.milestones)
-        ? o.milestones.map((m: any) => ({
-          step: String(m.step),
-          occurredAt: m?.occurredAt ? new Date(m.occurredAt).toISOString() : null,
-        }))
-        : [],
-      costs: Array.isArray(o.costs)
-        ? o.costs.map((c: any) => ({ valueNet: c?.amountNet != null ? Number(c.amountNet) : null }))
-        : [],
-      // Usuwamy ręczne mapowanie dat kroków (np. sentAt, acceptedAt, ...)
+      id: o.id,
+      offerNo: o.offerNo ?? '',
+      title: o.title,
+      clientName: o.client?.name ?? '',
+      valueNet: toNum(o.valueNet),
+      costsSumNet: toNum(o.costsSumNet),
+      currency: o.currency,
+      status: o.status,
+      createdAt: toYMD(o.createdAt),
+      finalizedAt: toYMD(o.finalizedAt),
+      cancelledAt: toYMD(o.cancelledAt),
+      sentAt: milestones.WYSLANIE ?? "",
+      acceptedAt: milestones.AKCEPTACJA ?? "",
+      executedAt: milestones.WYKONANIE ?? "",
+      protocolAt: milestones.PROTOKOL_WYSLANY ?? "",
+      handoverAt: milestones.ODBIOR_PRAC ?? "",
+      pwfAt: milestones.PWF ?? "",
+      contractor: (o.meta && typeof o.meta === 'object') ? String((o.meta as any).contractor ?? '') : '',
+      vendorOrderNo: (o.meta && typeof o.meta === 'object') ? String((o.meta as any).vendorOrderNo ?? '') : '',
     };
   });
-
-  // Linki sortowania
-  const common = { offerMonth: selectedMonth, step: selStep, dateFrom: selFrom, dateTo: selTo, dateDir, cancelled: showCancelled ? "1" : undefined };
-  const _linkAsc = withParams("/offers", { ...common, dir: "asc" });
-  const _linkDesc = withParams("/offers", { ...common, dir: "desc" });
-  const _linkDateAsc = withParams("/offers", { ...common, dir, dateDir: "asc" });
-  const _linkDateDesc = withParams("/offers", { ...common, dir, dateDir: "desc" });
 
   // Link przełącznika anulowanych
   const linkCancelledOn = withParams("/offers", { ...common, cancelled: "1" });

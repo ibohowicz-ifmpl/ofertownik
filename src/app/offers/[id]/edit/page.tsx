@@ -1,11 +1,11 @@
 // src/app/offers/[id]/edit/page.tsx — kompaktowy wrapper (max do góry + md:gap-4)
 import { prisma } from "@/lib/prisma";
 import EditPanel from "../editPanel";
+import EditDates from "../editDates"; // <-- dodaj do lewej kolumny!
 import CostsPanel from "../costsPanel";
 import InfoPanel from "../infoPanel";
 import StatusPanel from "../statusPanel";
-// import EditDates from "../editDates";
-import StickyBannerClient from "../stickyBannerClient"; // ⬅️ DODANE
+import StickyBannerClient from "../stickyBannerClient";
 import { notFound } from 'next/navigation';
 
 export const dynamic = "force-dynamic";
@@ -54,17 +54,18 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
     wartoscKosztow: String(offer.costsSumNet ?? 0),
   };
 
-  // Mapowanie istniejących dat do YYYY-MM-DD (po kluczach enuma)
-  const toYMD = (d?: Date | string | null) =>
-    d ? new Date(d).toISOString().slice(0, 10) : '';
-  const initialDates = {
-    WYSLANIE:         toYMD(offer.milestones.find(m => m.step === 'WYSLANIE')?.occurredAt),
-    AKCEPTACJA:       toYMD(offer.milestones.find(m => m.step === 'AKCEPTACJA')?.occurredAt),
-    WYKONANIE:        toYMD(offer.milestones.find(m => m.step === 'WYKONANIE')?.occurredAt),
-    PROTOKOL_WYSLANY: toYMD(offer.milestones.find(m => m.step === 'PROTOKOL_WYSLANY')?.occurredAt),
-    ODBIOR_PRAC:      toYMD(offer.milestones.find(m => m.step === 'ODBIOR_PRAC')?.occurredAt),
-    PWF:              toYMD(offer.milestones.find(m => m.step === 'PWF')?.occurredAt),
-  };
+  // Pobierz milestones z bazy
+  const rows = await prisma.offerMilestone.findMany({
+    where: { offerId: id },
+    orderBy: { occurredAt: "asc" },
+    select: { step: true, occurredAt: true },
+  });
+
+  // Zamień Date → "YYYY-MM-DD"
+  const initialRows = rows.map(r => ({
+    step: r.step,
+    occurredAt: (r.occurredAt as Date).toISOString().slice(0, 10),
+  }));
 
   return (
     <main className="px-4 md:px-5 pt-2 md:pt-2 pb-4">
@@ -73,11 +74,14 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
 
       <div className="mt-0 md:mt-0 flex gap-4 md:gap-4">
         {/* LEWA POŁOWA */}
-        <div className="w-full md:w-1/2">
+        <div className="w-full md:w-1/2 space-y-4">
           <EditPanel
             id={offer.id}
             initialFields={initialData}
-            initialDates={initialDates}
+          />
+          <EditDates
+            offerId={offer.id}
+            initialRows={initialRows}
           />
         </div>
 
@@ -89,7 +93,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
           <CostsPanel offerId={offer.id} />
           <InfoPanel offerId={offer.id} />
           <StatusPanel offerId={offer.id} />
-          {/* <EditDates offerId={offer.id} /> */}
+          {/* <div className="text-sm text-gray-600">Podsumowanie statusu oferty i etapów.</div> */}
         </div>
       </div>
     </main>

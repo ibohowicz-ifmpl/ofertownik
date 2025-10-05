@@ -6,14 +6,10 @@ import { toNumber, formatMoney, formatPercent, NUMERIC_CLS } from "@/lib/format"
 import { useCancelStatus, SoftBlock } from "./cancelGuard";
 import { useRouter } from "next/navigation";
 
-const STEP_ORDER = [
-  "WYSLANIE",
-  "AKCEPTACJA_ZLECENIE",
-  "WYKONANIE",
-  "PROTOKOL_WYSLANY",
-  "ODBIOR_PRAC",
-  "PWF",
-] as const;
+function formatPL2(text: string): string {
+  const n = toNumber(text);
+  return n == null ? text || "" : formatMoney(n);
+}
 
 type EditPanelProps = {
   id: string;
@@ -26,60 +22,12 @@ type EditPanelProps = {
     valueNet: string;
     wartoscKosztow?: string;
   };
-  initialDates: Record<string, string>;
+  // initialDates usuwamy z props, jeśli nie jest już używane
 };
-
-function formatPL2(text: string): string {
-  const n = toNumber(text);
-  return n == null ? text || "" : formatMoney(n);
-}
-
-function normalizeDateInput(v: any): string | "" {
-  if (!v) return "";
-  try {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v);
-    const d = new Date(String(v));
-    if (isNaN(d.getTime())) return "";
-    return d.toISOString().slice(0, 10);
-  } catch {
-    return "";
-  }
-}
-
-function toDatesRecordLoose(data: any): Record<string, string> {
-  const arr = Array.isArray(data?.items)
-    ? data.items
-    : Array.isArray(data?.milestones)
-      ? data.milestones
-      : null;
-
-  if (arr) {
-    const out: Record<string, string> = {};
-    for (const it of arr) {
-      const step = it?.step || it?.name || it?.code;
-      const when =
-        it?.occurredAt ??
-        it?.occurred_at ??
-        it?.date ??
-        it?.occurred ??
-        it?.at;
-      if (step) out[step] = normalizeDateInput(when);
-    }
-    return out;
-  }
-
-  if (data && typeof data === "object") {
-    const out: Record<string, string> = {};
-    for (const k of STEP_ORDER) out[k] = normalizeDateInput((data as any)[k]);
-    return out;
-  }
-  return {};
-}
 
 export default function EditPanel({
   id,
   initialFields,
-  initialDates,
 }: EditPanelProps) {
   // status anulowania
   const { isCancelled } = useCancelStatus(String(id));
@@ -103,27 +51,11 @@ export default function EditPanel({
   }, [id, initialFieldsFormatted]);
 
   const fieldsDirty =
-    // offerNo zablokowany → nie uwzględniamy w detekcji zmian
-    // fields.offerNo !== fieldsBaseline.offerNo ||
     fields.title !== fieldsBaseline.title ||
     fields.authorInitials !== fieldsBaseline.authorInitials ||
     fields.vendorOrderNo !== fieldsBaseline.vendorOrderNo ||
     fields.contractor !== fieldsBaseline.contractor ||
     (fields.valueNet || "") !== (fieldsBaseline.valueNet || "");
-
-  // ======= Daty etapów =======
-  const initialDatesNormalized = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const k of STEP_ORDER) out[k] = normalizeDateInput((initialDates || {})[k]);
-    return out;
-  }, [initialDates]);
-
-  const [dates, setDates] = useState<Record<string, string>>({ ...initialDatesNormalized });
-  const [savedDates, setSavedDates] = useState<Record<string, string>>({ ...initialDatesNormalized });
-
-  const dirtyDateKeys = STEP_ORDER.filter((k) => (dates[k] || "") !== (savedDates[k] || ""));
-  const anyDatesDirty = dirtyDateKeys.length > 0;
-  const wyslanieEmpty = !dates.WYSLANIE; // steruje widocznością przycisku "Usuń ofertę"
 
   // ======= KPI =======
   const [costsSum, setCostsSum] = useState<number>(0);
@@ -139,21 +71,8 @@ export default function EditPanel({
     } catch { }
   }
 
-  async function refreshDatesFromApi() {
-    try {
-      const bust = `t=${Date.now()}`;
-      const r = await fetch(`/api/offers/${id}/milestones?${bust}`, { cache: "no-store" });
-      if (!r.ok) return;
-      const data = await r.json();
-      const rec = toDatesRecordLoose(data);
-      setDates(rec);
-      setSavedDates(rec);
-    } catch { }
-  }
-
   useEffect(() => {
     refreshCostsSum();
-    refreshDatesFromApi();
   }, [id]);
 
   useEffect(() => {
@@ -230,34 +149,6 @@ export default function EditPanel({
     }
   }
 
-  async function saveDatesOnly() {
-    try {
-      if (!anyDatesDirty) return;
-
-      const payload: Record<string, string | null> = {};
-      for (const step of STEP_ORDER) payload[step] = dates[step] ? dates[step] : null;
-
-      const res = await fetch(`/api/offers/${id}/milestones`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status} ${res.statusText}`);
-      }
-
-      await refreshDatesFromApi();
-      setSaveMsg({ text: "Zapisano daty etapów.", type: "success" });
-      setTimeout(() => setSaveMsg(null), 1500);
-
-      window.dispatchEvent(new CustomEvent("offer-dates-saved", { detail: { offerId: id } }));
-    } catch (e: any) {
-      setSaveMsg({ text: e?.message || "Błąd zapisu dat.", type: "error" });
-      setTimeout(() => setSaveMsg(null), 3500);
-    }
-  }
-
   // Usuwanie oferty (tylko gdy brak daty wysłania)
   async function deleteOffer() {
     try {
@@ -284,6 +175,60 @@ export default function EditPanel({
     "inline-flex items-center gap-1 rounded px-3 py-1 border transition-colors " +
     "border-blue-700 text-blue-800 bg-blue-50";
 
+  // Pobierz daty etapów (milestones) z API, aby sprawdzić czy można pokazać przycisk Usuń ofertę
+  const [hasLaterMilestone, setHasLaterMilestone] = useState(false);
+
+  useEffect(() => {
+    async function checkMilestones() {
+      try {
+        const res = await fetch(`/api/offers/${id}/milestones`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        // Szukamy czy istnieje data dla AKCEPTACJA lub późniejszych kroków
+        const steps = ["AKCEPTACJA", "WYKONANIE", "PROTOKOL_WYSLANY", "ODBIOR_PRAC", "PWF"];
+        const found = (data.items || []).some((m: any) =>
+          steps.includes(m.step) && m.occurredAt
+        );
+        setHasLaterMilestone(found);
+      } catch {
+        setHasLaterMilestone(false);
+      }
+    }
+    checkMilestones();
+
+    // Dodaj nasłuchiwanie na offer-dates-saved
+    function onDatesSaved(e: any) {
+      if (e?.detail?.offerId === id) checkMilestones();
+    }
+    window.addEventListener("offer-dates-saved", onDatesSaved);
+    return () => window.removeEventListener("offer-dates-saved", onDatesSaved);
+  }, [id]);
+
+  // Pobierz informację o kosztach oferty, by zablokować przycisk Usuń ofertę jeśli istnieją koszty
+  const [hasCosts, setHasCosts] = useState(false);
+
+  useEffect(() => {
+    async function checkCosts() {
+      try {
+        const res = await fetch(`/api/offers/${id}/costs`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const found = Array.isArray(data?.items) && data.items.length > 0;
+        setHasCosts(found);
+      } catch {
+        setHasCosts(false);
+      }
+    }
+    checkCosts();
+
+    // Odświeżaj po zmianie kosztów
+    function onCostsSaved(e: any) {
+      if (e?.detail?.offerId === id) checkCosts();
+    }
+    window.addEventListener("offer-costs-saved", onCostsSaved);
+    return () => window.removeEventListener("offer-costs-saved", onCostsSaved);
+  }, [id]);
+
   return (
     <SoftBlock disabled={isCancelled}>
       <div className="space-y-4">
@@ -302,15 +247,30 @@ export default function EditPanel({
         <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
           <div className="flex items-center justify-between mb-2">
             <div className="font-semibold">Dane oferty</div>
-            <button
-              type="button"
-              aria-pressed={editMode}
-              onClick={() => setEditMode((v) => !v)}
-              className={editMode ? btnBlueActive : btnBlueOutline}
-              title={editMode ? "Wyłącz tryb edycji" : "Włącz tryb edycji"}
-            >
-              Edytuj
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Przycisk Usuń ofertę – widoczny tylko jeśli NIE ma daty akceptacji ani późniejszych */}
+              {!hasLaterMilestone && (
+                <button
+                  type="button"
+                  onClick={hasCosts ? undefined : deleteOffer}
+                  className={`inline-flex items-center gap-1 rounded px-3 py-1 border border-red-600 text-red-700 bg-white hover:bg-red-50 ${hasCosts ? "opacity-60 cursor-not-allowed" : ""}`}
+                  disabled={isCancelled || hasCosts}
+                  title={hasCosts ? "Istnieją koszty do tej oferty" : "Usuń ofertę"}
+                >
+                  Usuń ofertę
+                </button>
+              )}
+              {/* Przycisk Edytuj */}
+              <button
+                type="button"
+                aria-pressed={editMode}
+                onClick={() => setEditMode((v) => !v)}
+                className={editMode ? btnBlueActive : btnBlueOutline}
+                title={editMode ? "Wyłącz tryb edycji" : "Włącz tryb edycji"}
+              >
+                Edytuj
+              </button>
+            </div>
           </div>
 
           {/* ciaśniej w poziomie, komfort w pionie */}
@@ -318,7 +278,7 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Nr oferty</span>
               <input
-                className={`border rounded px-2 py-1 text-blue-700`}
+                className={`border rounded px-2 py-1 text-blue-700 bg-gray-100`}
                 value={fieldsBaseline.offerNo}
                 readOnly
               />
@@ -327,8 +287,10 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Autor (inicjały)</span>
               <input
-                className={`border rounded px-2 py-1 ${editMode && fields.authorInitials !== fieldsBaseline.authorInitials ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  }`}
+                className={`border rounded px-2 py-1 ${editMode
+                  ? "bg-yellow-50 ring-1 ring-yellow-200"
+                  : ""
+                  } ${editMode && fields.authorInitials !== fieldsBaseline.authorInitials ? "ring-1 ring-yellow-400" : ""}`}
                 value={fields.authorInitials}
                 onChange={(e) => setFields((s) => ({ ...s, authorInitials: e.target.value }))}
                 disabled={!editMode}
@@ -338,8 +300,10 @@ export default function EditPanel({
             <label className="md:col-span-2 grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Tytuł</span>
               <input
-                className={`border rounded px-2 py-1 text-blue-700 ${editMode && fields.title !== fieldsBaseline.title ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  }`}
+                className={`border rounded px-2 py-1 text-blue-700 ${editMode
+                  ? "bg-yellow-50 ring-1 ring-yellow-200"
+                  : ""
+                  } ${editMode && fields.title !== fieldsBaseline.title ? "ring-1 ring-yellow-400" : ""}`}
                 value={fields.title}
                 onChange={(e) => setFields((s) => ({ ...s, title: e.target.value }))}
                 disabled={!editMode}
@@ -349,8 +313,10 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Wykonawca</span>
               <input
-                className={`border rounded px-2 py-1 ${editMode && fields.contractor !== fieldsBaseline.contractor ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  }`}
+                className={`border rounded px-2 py-1 ${editMode
+                  ? "bg-yellow-50 ring-1 ring-yellow-200"
+                  : ""
+                  } ${editMode && fields.contractor !== fieldsBaseline.contractor ? "ring-1 ring-yellow-400" : ""}`}
                 value={fields.contractor}
                 onChange={(e) => setFields((s) => ({ ...s, contractor: e.target.value }))}
                 disabled={!editMode}
@@ -360,8 +326,10 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Wartość netto</span>
               <input
-                className={`border rounded px-2 py-1 text-right ${NUMERIC_CLS} ${editMode && (fields.valueNet || "") !== (fieldsBaseline.valueNet || "") ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  }`}
+                className={`border rounded px-2 py-1 text-right ${NUMERIC_CLS} ${editMode
+                  ? "bg-yellow-50 ring-1 ring-yellow-200"
+                  : ""
+                  } ${editMode && (fields.valueNet || "") !== (fieldsBaseline.valueNet || "") ? "ring-1 ring-yellow-400" : ""}`}
                 inputMode="decimal"
                 value={fields.valueNet}
                 onBlur={(e) => {
@@ -381,8 +349,10 @@ export default function EditPanel({
             <label className="grid gap-0.5">
               <span className="text-[12px] leading-tight text-gray-700">Numer zlecenia</span>
               <input
-                className={`border rounded px-2 py-1 ${editMode && fields.vendorOrderNo !== fieldsBaseline.vendorOrderNo ? "ring-1 ring-yellow-400 bg-yellow-50" : ""
-                  }`}
+                className={`border rounded px-2 py-1 ${editMode
+                  ? "bg-yellow-50 ring-1 ring-yellow-200"
+                  : ""
+                  } ${editMode && fields.vendorOrderNo !== fieldsBaseline.vendorOrderNo ? "ring-1 ring-yellow-400" : ""}`}
                 value={fields.vendorOrderNo}
                 onChange={(e) => setFields((s) => ({ ...s, vendorOrderNo: e.target.value }))}
                 disabled={!editMode}
@@ -416,83 +386,6 @@ export default function EditPanel({
               }
             >
               Zapisz dane
-            </button>
-          </div>
-        </div>
-
-        {/* Daty etapów */}
-        <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="font-semibold">Daty etapów</div>
-
-            {/* Usuń ofertę – tylko gdy brak daty wysłania */}
-            {wyslanieEmpty && (
-              <button
-                onClick={deleteOffer}
-                className="rounded px-3 py-1 border text-orange-600 border-orange-400 bg-white
-                           hover:bg-red-600 hover:border-red-600 hover:text-white
-                           transition-colors"
-                title="Usuń ofertę (dostępne tylko dopóki nie wysłano oferty)"
-              >
-                Usuń ofertę
-              </button>
-            )}
-          </div>
-
-          {/* Mniejsze odstępy w poziomie, wygodne w pionie */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-3">
-            {STEP_ORDER.map((step, idx) => {
-              const enabled = idx === 0 ? true : Boolean(dates[STEP_ORDER[idx - 1]]);
-              const dirty = (dates[step] || "") !== (savedDates[step] || "");
-              const min = idx > 0 && dates[STEP_ORDER[idx - 1]] ? dates[STEP_ORDER[idx - 1]] : undefined;
-
-              const label =
-                step === "WYSLANIE"
-                  ? "Data wysłania"
-                  : step === "AKCEPTACJA_ZLECENIE"
-                    ? "Data akceptacji"
-                    : step === "WYKONANIE"
-                      ? "Data wykonania"
-                      : step === "PROTOKOL_WYSLANY"
-                        ? "Data protokołu"
-                        : step === "ODBIOR_PRAC"
-                          ? "Data odbioru prac"
-                          : "Data PWF";
-
-              return (
-                <label key={step} className="grid gap-0.5">
-                  <span className={`text-[12px] leading-tight ${dirty ? "text-amber-700 font-medium" : "text-gray-700"} ${!enabled ? "opacity-70" : ""}`}>
-                    {label}
-                  </span>
-                  <input
-                    type="date"
-                    className={`border rounded px-2 py-1 ${dirty ? "ring-1 ring-yellow-400 bg-yellow-50 " : ""} ${!enabled ? "bg-gray-50 text-gray-500 cursor-not-allowed " : ""
-                      }`}
-                    value={dates[step] || ""}
-                    onChange={(e) => setDates((m) => ({ ...m, [step]: e.target.value }))}
-                    disabled={!enabled}
-                    min={min}
-                    title={enabled ? "" : "Najpierw uzupełnij wcześniejsze etapy"}
-                  />
-                </label>
-              );
-            })}
-          </div>
-
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <div className="text-[12px] text-gray-600">{anyDatesDirty ? `Niezapisane daty: ${dirtyDateKeys.length}` : ""}</div>
-            <button
-              onClick={saveDatesOnly}
-              disabled={!anyDatesDirty}
-              className={
-                "rounded px-3 py-1 " +
-                (anyDatesDirty
-                  ? "border border-red-500 text-white bg-red-600 hover:bg-red-700"
-                  : "border border-gray-300 text-gray-700 bg-white hover:bg-gray-50")
-              }
-              title={anyDatesDirty ? "Zapisz zmienione daty" : "Brak zmian do zapisania"}
-            >
-              Zapisz daty
             </button>
           </div>
         </div>

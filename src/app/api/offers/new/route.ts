@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
     const title = safeStr(body.title);
     if (!title) {
-      return NextResponse.json({ ok: false, error: 'Brak tytu³u oferty' }, { status: 400 });
+      return NextResponse.json({ ok: false, error: 'Brak tytuÅ‚u oferty' }, { status: 400 });
     }
 
     // 1) Ustalenie klienta (wymagane: id albo name; NIP wymagany przy tworzeniu)
@@ -44,10 +44,10 @@ export async function POST(req: Request) {
       clientId = client.id;
     }
 
-    // 2) Autor (na DEV: pierwszy aktywny; w produkcji – z sesji)
+    // 2) Autor (na DEV: pierwszy aktywny; w produkcji â€“ z sesji)
     const author = await prisma.user.findFirst({ where: { isActive: true }, select: { id: true } });
     if (!author) {
-      return NextResponse.json({ ok: false, error: 'Brak aktywnego u¿ytkownika do przypisania jako autor' }, { status: 500 });
+      return NextResponse.json({ ok: false, error: 'Brak aktywnego uÅ¼ytkownika do przypisania jako autor' }, { status: 500 });
     }
 
     // 3) Dane oferty
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     const valueNet = Number(body.valueNet ?? 0);
     const currency = safeStr(body.currency) || 'PLN';
     const contractor = safeStr(body.contractor);
-    const offerNo = safeStr(body.offerNo); // zwykle pusty – numer nada finalizacja
+    const offerNo = safeStr(body.offerNo); // zwykle pusty â€“ numer nada finalizacja
 
     const data: any = {
       clientId,

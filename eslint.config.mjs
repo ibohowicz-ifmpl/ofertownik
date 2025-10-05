@@ -1,6 +1,7 @@
 // eslint.config.mjs — minimalny flat config dla ESLint 9 (bez Next presetów)
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
+import unusedImports from "eslint-plugin-unused-imports";
 
 export default [
   // Bazowe reguły TS (bez type-checka — szybkie i stabilne)
@@ -20,17 +21,21 @@ export default [
     ],
   },
 
-  // Ogólne reguły + react-hooks (exhaustive-deps wyłączone na razie)
+  // Ogólne reguły + react-hooks + unused-imports
   {
     files: ["**/*.{ts,tsx}"],
-    plugins: { "react-hooks": reactHooks },
+    plugins: { "react-hooks": reactHooks, "unused-imports": unusedImports },
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "off",
       "prefer-const": "warn",
-      "@typescript-eslint/no-unused-vars": [
+
+      // Zamiast ostrzegania przez TS, polegamy na pluginie unused-imports:
+      "@typescript-eslint/no-unused-vars": "off",
+      "unused-imports/no-unused-imports": "error",
+      "unused-imports/no-unused-vars": [
         "warn",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }
+        { vars: "all", varsIgnorePattern: "^_", args: "after-used", argsIgnorePattern: "^_" }
       ]
     }
   },

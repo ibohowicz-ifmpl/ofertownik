@@ -3,31 +3,40 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatMoney, formatPercent, formatISODate } from "@/lib/format";
+import { useRouter } from "next/navigation";
 
 export type OfferRow = {
   id: string;
-  offerNo: string | null;
-  title: string | null;
-  clientName: string | null;
-  contractor: string | null;
-  vendorOrderNo: string | null;
-  valueNet: number | null;
-  cancelledAt?: string | null; // może być null dla aktywnych
-  milestones: { step: string; occurredAt: string | null }[];
-  costs: { valueNet: number | null }[];
-  acceptedAt?: string | Date;
+  offerNo: string;
+  title: string;
+  clientName: string;
+  valueNet: number;
+  costsSumNet: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  finalizedAt: string;
+  cancelledAt: string;
+  sentAt: string;
+  acceptedAt: string;
+  executedAt: string;
+  protocolAt: string;
+  handoverAt: string;
+  pwfAt: string;
+  contractor: string;
+  vendorOrderNo: string;
+  milestones?: { step: string; occurredAt: string | null }[];
 };
 
 type AttentionLevel = "NONE" | "YELLOW" | "RED" | "BLUE";
 
-const STEP_LABEL = {
-  WYSLANIE: "Wysłanie",
-  AKCEPTACJA: "Akceptacja",
-  WYKONANIE: "Wykonanie",
-  PROTOKOL_WYSLANY: "Protokół",
-  ODBIOR_PRAC: "Odbiór prac",
-  PWF: "PWF",
-} as const;
+type StepKey =
+  | 'WYSLANIE'
+  | 'AKCEPTACJA'
+  | 'WYKONANIE'
+  | 'PROTOKOL_WYSLANY'
+  | 'ODBIOR_PRAC'
+  | 'PWF';
 
 const STEP_ORDER = [
   "WYSLANIE",
@@ -38,7 +47,23 @@ const STEP_ORDER = [
   "PWF",
 ] as const;
 
-type StepKey = typeof STEP_ORDER[number];
+const STEP_LABEL: Record<typeof STEP_ORDER[number], string> = {
+  WYSLANIE: "Data wysłania",
+  AKCEPTACJA: "Data akceptacji",
+  WYKONANIE: "Data wykonania",
+  PROTOKOL_WYSLANY: "Data protokołu",
+  ODBIOR_PRAC: "Data odbioru prac",
+  PWF: "Data PWF",
+};
+
+const STEP_FIELD: Record<StepKey, keyof OfferRow> = {
+  WYSLANIE: 'sentAt',
+  AKCEPTACJA: 'acceptedAt',
+  WYKONANIE: 'executedAt',
+  PROTOKOL_WYSLANY: 'protocolAt',
+  ODBIOR_PRAC: 'handoverAt',
+  PWF: 'pwfAt',
+};
 
 function marzaClass(m: number | null) {
   if (m == null) return "text-gray-700";
@@ -61,37 +86,11 @@ function readAttention(offerId: string): { level: AttentionLevel; note: string }
   }
 }
 
-function wyslanieOf(o: OfferRow): string | null {
-  return (o.milestones ?? []).find((m) => m.step === "WYSLANIE")?.occurredAt ?? null;
-}
 
-// Dodaj typ Row zgodny z Twoją strukturą:
-type Row = {
-  id: string;
-  offerNo: string;
-  title: string;
-  clientName: string;
-  valueNet: number;
-  costsSumNet: number;
-  currency: string;
-  status: string;
-  createdAt: string;
-  finalizedAt: string;
-  cancelledAt: string;
-  sentAt: string;
-  acceptedAt: string;
-  executedAt: string;
-  protocolAt: string;
-  handoverAt: string;
-  pwfAt: string;
-  contractor: string;
-  vendorOrderNo: string;
-};
-
-type OffersTableClientProps = {
-  rows: Row[];
-  headerBg: string;
-  rowAccent: string;
+type Props = {
+  rows: OfferRow[];
+  headerBg?: string;
+  rowAccent?: string;
   row1Top?: number;
   row2Top?: number;
   showCancelled?: boolean;
@@ -104,8 +103,9 @@ export default function OffersTableClient({
   row1Top = 0,
   row2Top = 40,
   showCancelled = false,
-}: OffersTableClientProps) {
-  const data: Row[] = Array.isArray(rows) ? rows : [];
+}: Props) {
+  const router = useRouter();
+  const data: OfferRow[] = Array.isArray(rows) ? rows : [];
 
   // Stabilny klucz po ID do efektów zależnych od listy
   const idsKey = useMemo(() => data.map((o) => o.id).join(","), [data]);
@@ -164,6 +164,21 @@ export default function OffersTableClient({
 
   }, [showCancelled, idsKey]);
 
+  // Helper do wartości kroku
+  function getStepVal(row: OfferRow, step: StepKey): string {
+    const f = STEP_FIELD[step];
+    const v = row[f];
+    return (typeof v === 'string' ? v : '') || '';
+  }
+
+  useEffect(() => {
+    function onDatesSaved() {
+      router.refresh();
+    }
+    window.addEventListener("offer-dates-saved", onDatesSaved);
+    return () => window.removeEventListener("offer-dates-saved", onDatesSaved);
+  }, [router]);
+
   return (
     <table className="w-full text-[13px]">
       <thead>
@@ -201,15 +216,13 @@ export default function OffersTableClient({
           </th>
 
           {!showCancelled ? (
-            <>
-              <th
-                className="py-2 pr-1 text-center sticky z-30 h-10 align-middle"
-                style={{ top: row1Top, backgroundColor: headerBg }}
-                colSpan={STEP_ORDER.length + 1}
-              >
-                Daty etapów
-              </th>
-            </>
+            <th
+              className="py-2 pr-1 text-center sticky z-30 h-10 align-middle"
+              style={{ top: row1Top, backgroundColor: headerBg }}
+              colSpan={STEP_ORDER.length}
+            >
+              Daty etapów
+            </th>
           ) : (
             <>
               <th
@@ -218,13 +231,6 @@ export default function OffersTableClient({
                 rowSpan={2}
               >
                 Wysłanie
-              </th>
-              <th
-                className="py-2 pr-2 whitespace-nowrap sticky z-30 h-10 align-middle"
-                style={{ top: row1Top, backgroundColor: headerBg }}
-                rowSpan={2}
-              >
-                Akceptacja
               </th>
               <th
                 className="py-2 pr-2 whitespace-nowrap sticky z-30 h-10 align-middle"
@@ -292,20 +298,14 @@ export default function OffersTableClient({
                 {STEP_LABEL[s]}
               </th>
             ))}
-            <th
-              className="py-2 pr-1 w-[5.25rem] text-[11px] sticky z-20 h-10"
-              style={{ top: row2Top, backgroundColor: headerBg }}
-            >
-              Akceptacja
-            </th>
           </tr>
         )}
       </thead>
 
       <tbody>
-        {data.map((o) => {
-          const netto = o.valueNet ?? 0;
-          const koszty = (o.costs ?? []).reduce((acc, it) => acc + (Number(it?.valueNet) || 0), 0);
+        {data.map((row: OfferRow) => {
+          const netto = row.valueNet ?? 0;
+          const koszty = row.costsSumNet ?? 0;
           const zysk = netto - koszty;
           const marza = netto > 0 ? (zysk / netto) * 100 : null;
 
@@ -313,69 +313,52 @@ export default function OffersTableClient({
           const marzaCls = marzaClass(marza);
 
           // Znacznik uwagi (lewostronny pasek)
-          const att = attMap[o.id] || { level: "NONE", note: "" };
+          const att = attMap[row.id] || { level: "NONE", note: "" };
           const leftMarker =
             att.level === "RED"
-              ? "border-l-4 [border-left-color:#dc2626]"     // red-600
+              ? "border-l-4 [border-left-color:#dc2626]"
               : att.level === "YELLOW"
-                ? "border-l-4 [border-left-color:#f59e0b]"     // amber-500
+                ? "border-l-4 [border-left-color:#f59e0b]"
                 : att.level === "BLUE"
-                  ? "border-l-4 [border-left-color:#3b82f6]"     // blue-500
+                  ? "border-l-4 [border-left-color:#3b82f6]"
                   : "";                                           // NONE → brak paska
 
 
-          const wyslanie = wyslanieOf(o);
-          const anulowano = o.cancelledAt ?? null;
-          const cancelReason = cancelMap[o.id]?.reason ?? null;
+          const anulowano = row.cancelledAt ?? null;
+          const cancelReason = cancelMap[row.id]?.reason ?? null;
 
           return (
-            <tr key={o.id} className="align-top border-b hover:bg-[#E6FBFC]" style={{ borderColor: rowAccent }}>
+            <tr key={row.id} className="align-top border-b hover:bg-[#E6FBFC]" style={{ borderColor: rowAccent }}>
               <td
                 className={`py-2 pr-2 pl-2 whitespace-nowrap bg-gray-50 border-r border-gray-200 w-[8.5rem] ${leftMarker}`}
                 title={att.note || undefined}
               >
-                {o.offerNo || "—"}
+                {row.offerNo || "—"}
               </td>
 
               <td className="py-2 pr-4 pl-2 max-w-[52rem]">
                 <div
                   className="leading-snug"
                   style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-                  title={o.title || ""}
+                  title={row.title || ""}
                 >
-                  {o.title || "—"}
+                  {row.title || "—"}
                 </div>
               </td>
 
-              <td className="py-2 pr-3 whitespace-nowrap uppercase">{o.clientName || "—"}</td>
+              <td className="py-2 pr-3 whitespace-nowrap uppercase">{row.clientName || "—"}</td>
 
               <td className="py-2 pr-3 whitespace-nowrap text-right tabular-nums">{formatMoney(netto)}</td>
 
               {!showCancelled ? (
-                <>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.sentAt)}
+                STEP_ORDER.map((s: StepKey) => (
+                  <td key={s} className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
+                    {getStepVal(row, s) || "-"}
                   </td>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.acceptedAt)}
-                  </td>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.executedAt)}
-                  </td>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.protocolAt)}
-                  </td>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.handoverAt)}
-                  </td>
-                  <td className="py-2 pr-1 w-[5.25rem] whitespace-nowrap bg-gray-50 text-center">
-                    {formatISODate(o.pwfAt)}
-                  </td>
-                </>
+                ))
               ) : (
                 <>
-                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{formatISODate(o.sentAt)}</td>
-                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{formatISODate(o.acceptedAt)}</td>
+                  <td className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center">{row.sentAt || "-"}</td>
                   <td
                     className="py-2 pr-2 whitespace-nowrap bg-gray-50 text-center"
                     title={cancelReason || undefined}
@@ -385,8 +368,8 @@ export default function OffersTableClient({
                 </>
               )}
 
-              <td className="py-2 pr-3 whitespace-nowrap hidden">{o.vendorOrderNo || "—"}</td>
-              <td className="py-2 pr-3 pl-2 whitespace-nowrap">{o.contractor || "—"}</td>
+              <td className="py-2 pr-3 whitespace-nowrap hidden">{row.vendorOrderNo || "—"}</td>
+              <td className="py-2 pr-3 pl-2 whitespace-nowrap">{row.contractor || "—"}</td>
 
               <td className="py-2 pr-3 whitespace-nowrap text-right bg-gray-50 border-l border-gray-200 tabular-nums">
                 {formatMoney(koszty)}
@@ -400,7 +383,7 @@ export default function OffersTableClient({
 
               <td className="py-2 pr-0 whitespace-nowrap text-right">
                 <a
-                  href={`/offers/${o.id}/edit`}
+                  href={`/offers/${row.id}/edit`}
                   className="inline-block rounded px-3 py-1 border border-blue-400 text-blue-700 bg-blue-50 hover:bg-blue-100"
                 >
                   Edytuj

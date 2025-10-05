@@ -39,3 +39,7 @@ export function formatISODate(d?: Date | string | null) {
 
 // Klasa do wyrównania cyfr w tabelach
 export const NUMERIC_CLS = "tabular-nums text-right";
+
+// Aliasy „kanoniczne” (bez zmiany formatu w UI)
+export const formatCurrencyPLN = (n?: number | null) => formatMoney(n);
+export const formatDate = (d?: Date | string | null) => formatISODate(d);
