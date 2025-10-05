@@ -30,111 +30,203 @@ export default function AdminContactsPage() {
 }
 
 function ContactsPageInner() {
-  const { data } = useSWR<Row[]>("/api/admin/contacts", fetcher);
-  const BASE_ROWS: Row[] = data ?? [];
-  const currentRole = useAdminRole();
+   const { data, mutate } = useSWR<Row[]>("/api/admin/contacts", fetcher);
+   const BASE_ROWS: Row[] = data ?? [];
+   const currentRole = useAdminRole();
 
-  const { initial, setUrl } = useUrlState<{
-    q: string;
-    sortKey: keyof Row;
-    sortDir: SortDir;
-  }>({
-    q: "",
-    sortKey: "name",
-    sortDir: "asc",
-  });
-  const [q, setQ] = useState(initial.q);
-  const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
-  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
+   const { initial, setUrl } = useUrlState<{
+     q: string;
+     sortKey: keyof Row;
+     sortDir: SortDir;
+   }>({
+     q: "",
+     sortKey: "name",
+     sortDir: "asc",
+   });
+   const [q, setQ] = useState(initial.q);
+   const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
+   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
 
-  // Synchronizuj URL przy zmianie filtrów/sortowania
-  useMemo(() => {
-    setUrl({ q, sortKey, sortDir }, "/admin/contacts");
-  }, [q, sortKey, sortDir, setUrl]);
+   const [addName, setAddName] = useState("");
+   const [addEmail, setAddEmail] = useState("");
+   const [addClient, setAddClient] = useState("");
+   const [editName, setEditName] = useState("");
+   const [editEmail, setEditEmail] = useState("");
+   const [editClient, setEditClient] = useState("");
 
-  const rows = useMemo(() => {
-    const ql = q.toLowerCase().trim();
-    const filtered = BASE_ROWS.filter((r) =>
-      !ql ||
-      r.name.toLowerCase().includes(ql) ||
-      r.email.toLowerCase().includes(ql) ||
-      r.client.toLowerCase().includes(ql) ||
-      r.id.toLowerCase().includes(ql)
-    );
+   // Synchronizuj URL przy zmianie filtrów/sortowania
+   useMemo(() => {
+     setUrl({ q, sortKey, sortDir }, "/admin/contacts");
+   }, [q, sortKey, sortDir, setUrl]);
 
-    const getter: Record<keyof Row, (x: Row) => string | number> = {
-      id: (x) => x.id,
-      name: (x) => x.name,
-      email: (x) => x.email,
-      client: (x) => x.client,
-    };
+   const rows = useMemo(() => {
+     const ql = q.toLowerCase().trim();
+     const filtered = BASE_ROWS.filter((r) =>
+       !ql ||
+       r.name.toLowerCase().includes(ql) ||
+       r.email.toLowerCase().includes(ql) ||
+       r.client.toLowerCase().includes(ql) ||
+       r.id.toLowerCase().includes(ql)
+     );
 
-    return [...filtered].sort(compareBy(getter[sortKey], sortDir));
-  }, [q, sortKey, sortDir]);
+     const getter: Record<keyof Row, (x: Row) => string | number> = {
+       id: (x) => x.id,
+       name: (x) => x.name,
+       email: (x) => x.email,
+       client: (x) => x.client,
+     };
 
-  const toggleSort = (key: keyof Row) => {
-    if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("asc"); }
-  };
+     return [...filtered].sort(compareBy(getter[sortKey], sortDir));
+   }, [q, sortKey, sortDir]);
 
-  const [openAdd, setOpenAdd] = useState(false);
-  const [editRow, setEditRow] = useState<Row | null>(null);
-  const onRowClick = (r: Row) => {
-    if (!can(currentRole, "edit", "contacts")) return;
-    setEditRow(r);
-  };
+   const toggleSort = (key: keyof Row) => {
+     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+     else { setSortKey(key); setSortDir("asc"); }
+   };
 
-  return (
-    <Guard role={currentRole} resource="contacts">
-      <div className="space-y-3">
-        <div className="flex gap-2 flex-wrap items-center">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Szukaj po nazwie, emailu, kliencie…"
-            className="rounded border border-gray-300 px-3 py-1"
-          />
-          <div className="ml-auto flex gap-2">
-            {(["name", "email", "client"] as (keyof Row)[]).map((k) => (
-              <button
-                key={k}
-                onClick={() => toggleSort(k)}
-                className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
-              >
-                {k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-              </button>
-            ))}
-            <button
-              onClick={() => setOpenAdd(true)}
-              disabled={!can(currentRole, "create", "contacts")}
-              title={explain(currentRole, "create", "contacts") ?? undefined}
-              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              + Dodaj
-            </button>
-          </div>
-        </div>
+   const [openAdd, setOpenAdd] = useState(false);
+   const [editRow, setEditRow] = useState<Row | null>(null);
+   const onRowClick = (r: Row) => {
+     if (!can(currentRole, "edit", "contacts")) return;
+     setEditRow(r);
+     setEditName(r.name);
+     setEditEmail(r.email);
+     setEditClient(r.client);
+   };
 
-        <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
+   async function saveAdd() {
+     const res = await fetch("/api/admin/contacts", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ name: addName, email: addEmail, client: addClient }),
+     });
+     if (res.ok) {
+       setOpenAdd(false);
+       setAddName("");
+       setAddEmail("");
+       setAddClient("");
+       await mutate();
+     }
+   }
 
-        <Modal open={openAdd} onClose={() => setOpenAdd(false)} title="Dodaj kontakt (placeholder)"
-          actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
-          <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Imię i nazwisko" />
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Email" />
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Klient" />
-          </form>
-        </Modal>
+   async function saveEdit() {
+     if (!editRow) return;
+     const res = await fetch(`/api/admin/contacts/${editRow.id}`, {
+       method: "PUT",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ name: editName, email: editEmail, client: editClient }),
+     });
+     if (res.ok) {
+       setEditRow(null);
+       await mutate();
+     }
+   }
 
-        <Modal open={!!editRow} onClose={() => setEditRow(null)} title={`Edytuj kontakt: ${editRow?.name ?? ""} (placeholder)`}
-          actions={<button onClick={() => setEditRow(null)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
-          <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.email ?? ""} />
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.client ?? ""} />
-          </form>
-        </Modal>
-      </div>
-    </Guard>
-  );
-}
+   async function deleteContact() {
+     if (!editRow) return;
+     if (!confirm(`Na pewno usunąć kontakt: ${editRow.name}?`)) return;
+     const res = await fetch(`/api/admin/contacts/${editRow.id}`, { method: "DELETE" });
+     if (res.ok) { setEditRow(null); await mutate(); } else { console.error(await res.json()); }
+   }
+
+   return (
+     <Guard role={currentRole} resource="contacts">
+       <div className="space-y-3">
+         <div className="flex gap-2 flex-wrap items-center">
+           <input
+             value={q}
+             onChange={(e) => setQ(e.target.value)}
+             placeholder="Szukaj po nazwie, emailu, kliencie…"
+             className="rounded border border-gray-300 px-3 py-1"
+           />
+           <div className="ml-auto flex gap-2">
+             {(["name", "email", "client"] as (keyof Row)[]).map((k) => (
+               <button
+                 key={k}
+                 onClick={() => toggleSort(k)}
+                 className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
+               >
+                 {k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+               </button>
+             ))}
+             <button
+               onClick={() => setOpenAdd(true)}
+               disabled={!can(currentRole, "create", "contacts")}
+               title={explain(currentRole, "create", "contacts") ?? undefined}
+               className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+             >
+               + Dodaj
+             </button>
+           </div>
+         </div>
+
+         <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
+
+         <Modal
+           open={openAdd}
+           onClose={() => setOpenAdd(false)}
+           title="Dodaj kontakt (placeholder)"
+           actions={
+             <button
+               onClick={saveAdd}
+               className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
+             >
+               Zapisz (mock)
+             </button>
+           }
+         >
+           <form className="grid gap-3">
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               placeholder="Imię i nazwisko"
+               value={addName}
+               onChange={(e) => setAddName(e.target.value)}
+             />
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               placeholder="Email"
+               value={addEmail}
+               onChange={(e) => setAddEmail(e.target.value)}
+             />
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               placeholder="Klient"
+               value={addClient}
+               onChange={(e) => setAddClient(e.target.value)}
+             />
+           </form>
+         </Modal>
+
+         <Modal
+           open={!!editRow}
+           onClose={() => setEditRow(null)}
+           title={`Edytuj kontakt: ${editRow?.name ?? ""} (placeholder)`}
+           actions={
+             <>
+               <button onClick={deleteContact} className="rounded border border-red-600 bg-red-600 text-white px-3 py-1 hover:bg-red-700 mr-2">Usuń</button>
+               <button onClick={saveEdit} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>
+             </>
+           }
+         >
+           <form className="grid gap-3">
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               value={editName}
+               onChange={(e) => setEditName(e.target.value)}
+             />
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               value={editEmail}
+               onChange={(e) => setEditEmail(e.target.value)}
+             />
+             <input
+               className="rounded border border-gray-300 px-3 py-1"
+               value={editClient}
+               onChange={(e) => setEditClient(e.target.value)}
+             />
+           </form>
+         </Modal>
+       </div>
+     </Guard>
+   );
+ }

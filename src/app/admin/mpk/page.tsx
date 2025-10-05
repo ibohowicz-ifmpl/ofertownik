@@ -31,7 +31,7 @@ export default function AdminMpkPage() {
 function MpkPageInner() {
   const currentRole = useAdminRole();
   const mpkRoles = useAdminMpkRoles();
-  const { data } = useSWR<Row[]>("/api/admin/mpk", fetcher);
+  const { data, mutate } = useSWR<Row[]>("/api/admin/mpk", fetcher);
   const BASE_ROWS: Row[] = data ?? [];
 
   const { initial, setUrl } = useUrlState<{
@@ -50,13 +50,16 @@ function MpkPageInner() {
   const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
   const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
 
+  const [addCode, setAddCode] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addRole, setAddRole] = useState<AdminMpkRole>("VIEWER");
+  const [editName, setEditName] = useState("");
+  const [editRole, setEditRole] = useState<AdminMpkRole>("VIEWER");
+
   // Synchronizuj URL przy zmianie filtrów/sortowania
   useMemo(() => {
     setUrl({ q, role, sortKey, sortDir }, "/admin/mpk");
   }, [q, role, sortKey, sortDir, setUrl]);
-
-
-
 
   const rows = useMemo(() => {
     const filtered = BASE_ROWS.filter((r) => {
@@ -88,7 +91,44 @@ function MpkPageInner() {
   const onRowClick = (r: Row) => {
     if (!canOnMpk(mpkRoles, r.code, "edit")) return;
     setEditRow(r);
+    setEditName(r.name);
+    setEditRole(r.defaultRole);
   };
+
+  async function saveAdd() {
+    const res = await fetch("/api/admin/mpk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: addCode, name: addName, defaultRole: addRole }),
+    });
+    if (res.ok) {
+      setOpenAdd(false);
+      setAddCode("");
+      setAddName("");
+      setAddRole("VIEWER");
+      await mutate();
+    }
+  }
+
+  async function saveEdit() {
+    if (!editRow) return;
+    const res = await fetch(`/api/admin/mpk/${editRow.code}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName, defaultRole: editRole }),
+    });
+    if (res.ok) {
+      setEditRow(null);
+      await mutate();
+    }
+  }
+
+  async function deleteMpk() {
+    if (!editRow) return;
+    if (!confirm(`Na pewno usunąć MPK ${editRow.code}?`)) return;
+    const res = await fetch(`/api/admin/mpk/${editRow.code}`, { method: "DELETE" });
+    if (res.ok) { setEditRow(null); await mutate(); } else { console.error(await res.json()); }
+  }
 
   return (
     <Guard role={currentRole} resource="mpk">
@@ -131,7 +171,7 @@ function MpkPageInner() {
               + Dodaj
             </button>
             <p className="text-xs text-gray-500 mt-2">
-              Klik wiersza edytuje tylko, jeśli {'{role}'} w danym MPK ma prawo „edit”.
+              Klik wiersza edytuje tylko, jeśli {'{role}'} w danym MPK ma prawo „edit".
               Brak edycji = "{explainOnMpk(mpkRoles, "Q22-OPS", "edit") ?? "OK"}" (przykład dla Q22-OPS).
             </p>
           </div>
@@ -143,12 +183,30 @@ function MpkPageInner() {
           open={openAdd}
           onClose={() => setOpenAdd(false)}
           title="Dodaj MPK (placeholder)"
-          actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}
+          actions={
+            <button onClick={saveAdd} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">
+              Zapisz (mock)
+            </button>
+          }
         >
           <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Kod MPK" />
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Nazwa jednostki" />
-            <select className="rounded border border-gray-300 px-3 py-1" defaultValue="VIEWER">
+            <input
+              className="rounded border border-gray-300 px-3 py-1"
+              placeholder="Kod MPK"
+              value={addCode}
+              onChange={(e) => setAddCode(e.target.value)}
+            />
+            <input
+              className="rounded border border-gray-300 px-3 py-1"
+              placeholder="Nazwa jednostki"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+            />
+            <select
+              className="rounded border border-gray-300 px-3 py-1"
+              value={addRole}
+              onChange={(e) => setAddRole(e.target.value as AdminMpkRole)}
+            >
               <option value="LEADER">LEADER</option>
               <option value="MANAGER">MANAGER</option>
               <option value="PM">PM</option>
@@ -161,12 +219,29 @@ function MpkPageInner() {
           open={!!editRow}
           onClose={() => setEditRow(null)}
           title={`Edytuj MPK: ${editRow?.code ?? ""} (placeholder)`}
-          actions={<button onClick={() => setEditRow(null)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}
+          actions={
+            <>
+              <button onClick={deleteMpk} className="rounded border border-red-600 bg-red-600 text-white px-3 py-1 hover:bg-red-700 mr-2">Usuń</button>
+              <button onClick={saveEdit} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>
+            </>
+          }
         >
           <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.code ?? ""} />
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
-            <select className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.defaultRole ?? "VIEWER"}>
+            <input
+              className="rounded border border-gray-300 px-3 py-1"
+              value={editRow?.code ?? ""}
+              disabled
+            />
+            <input
+              className="rounded border border-gray-300 px-3 py-1"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+            />
+            <select
+              className="rounded border border-gray-300 px-3 py-1"
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as AdminMpkRole)}
+            >
               <option value="LEADER">LEADER</option>
               <option value="MANAGER">MANAGER</option>
               <option value="PM">PM</option>

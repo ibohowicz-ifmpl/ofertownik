@@ -19,3 +19,9 @@ export function updateUser(id: string, patch: Partial<Pick<AdminUser, "name" | "
   USERS[idx] = { ...USERS[idx], ...patch };
   return USERS[idx];
 }
+
+export function removeUser(id: string): boolean {
+  const lenBefore = USERS.length;
+  USERS = USERS.filter(u => u.id !== id);
+  return USERS.length !== lenBefore;
+}
