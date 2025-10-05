@@ -6,17 +6,19 @@ import { useAdminRole, useAdminMpkRoles } from "@/app/admin/_UserContext";
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
-import { MOCK_MPK, type AdminMpk, type AdminMpkRole } from "@/app/admin/_mocks";
+import { type AdminMpk, type AdminMpkRole } from "@/app/admin/_mocks";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 import { useUrlState } from "@/lib/useUrlState";
 
 
 type Row = AdminMpk;
-const BASE_ROWS = MOCK_MPK;
 const cols = defineCols<Row>()([
   { key: "code", header: "MPK" },
   { key: "name", header: "Nazwa jednostki" },
   { key: "defaultRole", header: "Domyślna rola" },
 ] as const);
+
 
 export default function AdminMpkPage() {
   return (
@@ -29,6 +31,8 @@ export default function AdminMpkPage() {
 function MpkPageInner() {
   const currentRole = useAdminRole();
   const mpkRoles = useAdminMpkRoles();
+  const { data } = useSWR<Row[]>("/api/admin/mpk", fetcher);
+  const BASE_ROWS: Row[] = data ?? [];
 
   const { initial, setUrl } = useUrlState<{
     q: string;
@@ -50,6 +54,9 @@ function MpkPageInner() {
   useMemo(() => {
     setUrl({ q, role, sortKey, sortDir }, "/admin/mpk");
   }, [q, role, sortKey, sortDir, setUrl]);
+
+
+
 
   const rows = useMemo(() => {
     const filtered = BASE_ROWS.filter((r) => {

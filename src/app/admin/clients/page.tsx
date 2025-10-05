@@ -6,12 +6,14 @@ import { useAdminRole } from "@/app/admin/_UserContext";
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
-import { MOCK_CLIENTS, type AdminClient } from "@/app/admin/_mocks";
+import { type AdminClient } from "@/app/admin/_mocks";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 import { useUrlState } from "@/lib/useUrlState";
 
 
 type Row = AdminClient;
-const BASE_ROWS = MOCK_CLIENTS;
+
 const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Nazwa klienta" },
@@ -27,6 +29,8 @@ export default function AdminClientsPage() {
 }
 
 function ClientsPageInner() {
+  const { data } = useSWR<Row[]>("/api/admin/clients", fetcher);
+  const BASE_ROWS: Row[] = data ?? [];
   const currentRole = useAdminRole();
 
   const { initial, setUrl } = useUrlState<{

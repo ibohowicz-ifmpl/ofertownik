@@ -6,12 +6,14 @@ import { useAdminRole } from "@/app/admin/_UserContext";
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
-import { MOCK_CONTACTS, type AdminContact } from "@/app/admin/_mocks";
+import { type AdminContact } from "@/app/admin/_mocks";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 import { useUrlState } from "@/lib/useUrlState";
 
 
 type Row = AdminContact;
-const BASE_ROWS = MOCK_CONTACTS;
+
 const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Imię i nazwisko" },
@@ -28,6 +30,8 @@ export default function AdminContactsPage() {
 }
 
 function ContactsPageInner() {
+  const { data } = useSWR<Row[]>("/api/admin/contacts", fetcher);
+  const BASE_ROWS: Row[] = data ?? [];
   const currentRole = useAdminRole();
 
   const { initial, setUrl } = useUrlState<{

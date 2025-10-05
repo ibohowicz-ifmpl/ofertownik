@@ -1,24 +1,15 @@
 "use client";
 import { useMemo, useState, useEffect, Suspense } from "react";
-import { Modal } from "@/components/admin/Modal";
-import { useUrlState } from "@/lib/useUrlState";
+import useSWR from "swr";
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
-import { compareBy, type SortDir } from "@/lib/sort";
-import { MOCK_USERS, type AdminUser, type AdminUserRole } from "@/app/admin/_mocks";
+import { Modal } from "@/components/admin/Modal";
 import { Guard } from "@/components/admin/Guard";
 import { useAdminRole } from "@/app/admin/_UserContext";
 import { can, explain } from "@/lib/rbac";
-
-type Row = AdminUser;
-const BASE_ROWS = MOCK_USERS;
-
-const cols = defineCols<Row>()([
-  { key: "id", header: "ID" },
-  { key: "name", header: "Imię i nazwisko" },
-  { key: "email", header: "Email" },
-  { key: "role", header: "Rola" },
-] as const);
-
+import { compareBy, type SortDir } from "@/lib/sort";
+import { fetcher } from "@/lib/fetcher";
+import { useUrlState } from "@/lib/useUrlState";
+import type { AdminUserRole } from "@/app/admin/_mocks";
 
 export default function AdminUsersPage() {
   return (
@@ -30,6 +21,7 @@ export default function AdminUsersPage() {
 
 function UsersPageInner() {
   const currentRole = useAdminRole();
+  // URL state (DRY)
   const { initial, setUrl } = useUrlState<{
     q: string;
     role: AdminUserRole | "";
@@ -42,6 +34,20 @@ function UsersPageInner() {
     sortDir: "asc",
   });
 
+  type Row = {
+    id: string;
+    name: string;
+    email: string;
+    role: AdminUserRole;
+  };
+
+  const cols = defineCols<Row>()([
+    { key: "name", header: "Imię i nazwisko" },
+    { key: "email", header: "Email" },
+    { key: "role", header: "Rola" },
+  ] as const);
+
+  // lokalne stany synchronizowane do URL
   const [q, setQ] = useState(initial.q);
   const [role, setRole] = useState<AdminUserRole | "">(initial.role);
   const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
@@ -51,10 +57,14 @@ function UsersPageInner() {
     setUrl({ q, role, sortKey, sortDir }, "/admin/users");
   }, [q, role, sortKey, sortDir, setUrl]);
 
+  // dane z mock API
+  const { data, mutate } = useSWR<Row[]>("/api/admin/users", fetcher);
+  const BASE_ROWS: Row[] = data ?? [];
+
   const rows = useMemo(() => {
-    const ql = q.toLowerCase().trim();
     const filtered = BASE_ROWS.filter((r) => {
-      const hitRole = !role || String(r.role) === role;
+      const hitRole = role ? r.role === role : true;
+      const ql = q.toLowerCase().trim();
       const hitText =
         !ql ||
         r.name.toLowerCase().includes(ql) ||
@@ -63,7 +73,7 @@ function UsersPageInner() {
       return hitRole && hitText;
     });
 
-    const getter: Record<keyof Row, (x: Row) => string | number> = {
+    const getter: Record<keyof Row, (x: Row) => string> = {
       id: (x) => x.id,
       name: (x) => x.name,
       email: (x) => x.email,
@@ -71,36 +81,78 @@ function UsersPageInner() {
     };
 
     return [...filtered].sort(compareBy(getter[sortKey], sortDir));
-  }, [q, role, sortKey, sortDir]);
+  }, [BASE_ROWS, q, role, sortKey, sortDir]);
 
-  const toggleSort = (key: keyof Row) => {
-    if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
-
+  // Modale / akcje
   const [openAdd, setOpenAdd] = useState(false);
   const [editRow, setEditRow] = useState<Row | null>(null);
 
-  // Klik wiersza → edycja
-  const onRowClick = (r: Row) => setEditRow(r);
+  // Formularze (kontrolowane)
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addRole, setAddRole] = useState<AdminUserRole>("VIEWER");
+
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editRole, setEditRole] = useState<AdminUserRole>("VIEWER");
+
+  const onRowClick = (row: Row) => {
+    if (!can(currentRole, "edit", "users")) return;
+    setEditRow(row);
+    setEditName(row.name);
+    setEditEmail(row.email);
+    setEditRole(row.role);
+  };
+
+  const toggleSort = (key: keyof Row) => {
+    if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  async function saveAdd() {
+    const res = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: addName, email: addEmail, role: addRole }),
+    });
+    if (res.ok) {
+      setOpenAdd(false);
+      setAddName(""); setAddEmail(""); setAddRole("VIEWER");
+      await mutate();
+    } else {
+      console.error(await res.json());
+    }
+  }
+
+  async function saveEdit() {
+    if (!editRow) return;
+    const res = await fetch(`/api/admin/users/${editRow.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName, email: editEmail, role: editRole }),
+    });
+    if (res.ok) {
+      setEditRow(null);
+      await mutate();
+    } else {
+      console.error(await res.json());
+    }
+  }
 
   return (
     <Guard role={currentRole} resource="users">
       <div className="space-y-3">
         <div className="flex gap-2 flex-wrap items-center">
           <input
+            className="rounded border border-gray-300 px-3 py-1"
+            placeholder="Szukaj użytkownika..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Szukaj po nazwie, emailu, ID…"
-            className="rounded border border-gray-300 px-3 py-1"
           />
           <select
+            className="rounded border border-gray-300 px-3 py-1"
             value={role}
             onChange={(e) => setRole((e.target.value || "") as AdminUserRole | "")}
-            className="rounded border border-gray-300 px-3 py-1"
           >
             <option value="">Wszystkie role</option>
             <option value="LEADER">LEADER</option>
@@ -117,8 +169,7 @@ function UsersPageInner() {
                 className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
                 title={`Sortuj po ${k}`}
               >
-                {k}
-                {sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                {k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
               </button>
             ))}
             <button
@@ -132,16 +183,16 @@ function UsersPageInner() {
           </div>
         </div>
 
-        <SimpleTable cols={cols} rows={rows} onRowClick={(r) => onRowClick(r)} />
+        <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
 
-        {/* Modal dodawania użytkownika */}
+        {/* Modal: Dodaj */}
         <Modal
           open={openAdd}
           onClose={() => setOpenAdd(false)}
           title="Dodaj użytkownika (placeholder)"
           actions={
             <button
-              onClick={() => setOpenAdd(false)}
+              onClick={saveAdd}
               className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
             >
               Zapisz (mock)
@@ -149,9 +200,12 @@ function UsersPageInner() {
           }
         >
           <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Imię i nazwisko" />
-            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Email" />
-            <select className="rounded border border-gray-300 px-3 py-1" defaultValue="VIEWER">
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Imię i nazwisko"
+              value={addName} onChange={(e) => setAddName(e.target.value)} />
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Email"
+              value={addEmail} onChange={(e) => setAddEmail(e.target.value)} />
+            <select className="rounded border border-gray-300 px-3 py-1"
+              value={addRole} onChange={(e) => setAddRole(e.target.value as AdminUserRole)}>
               <option value="LEADER">LEADER</option>
               <option value="MANAGER">MANAGER</option>
               <option value="PM">PM</option>
@@ -160,14 +214,14 @@ function UsersPageInner() {
           </form>
         </Modal>
 
-        {/* Modal edycji użytkownika */}
+        {/* Modal: Edytuj */}
         <Modal
           open={!!editRow}
           onClose={() => setEditRow(null)}
           title={`Edytuj użytkownika: ${editRow?.name ?? ""} (placeholder)`}
           actions={
             <button
-              onClick={() => setEditRow(null)}
+              onClick={saveEdit}
               className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
             >
               Zapisz (mock)
@@ -175,9 +229,12 @@ function UsersPageInner() {
           }
         >
           <form className="grid gap-3">
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
-            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.email ?? ""} />
-            <select className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.role ?? "VIEWER"}>
+            <input className="rounded border border-gray-300 px-3 py-1"
+              value={editName} onChange={(e) => setEditName(e.target.value)} />
+            <input className="rounded border border-gray-300 px-3 py-1"
+              value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
+            <select className="rounded border border-gray-300 px-3 py-1"
+              value={editRole} onChange={(e) => setEditRole(e.target.value as AdminUserRole)}>
               <option value="LEADER">LEADER</option>
               <option value="MANAGER">MANAGER</option>
               <option value="PM">PM</option>
