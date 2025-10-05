@@ -1,6 +1,5 @@
 "use client";
-import { useMemo, useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState, Suspense } from "react";
 import { Guard } from "@/components/admin/Guard";
 import { canOnMpk, explainOnMpk } from "@/lib/rbac";
 import { useAdminRole, useAdminMpkRoles } from "@/app/admin/_UserContext";
@@ -8,6 +7,7 @@ import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_MPK, type AdminMpk, type AdminMpkRole } from "@/app/admin/_mocks";
+import { useUrlState } from "@/lib/useUrlState";
 
 
 type Row = AdminMpk;
@@ -27,26 +27,29 @@ export default function AdminMpkPage() {
 }
 
 function MpkPageInner() {
-  const router = useRouter();
-  const sp = useSearchParams();
   const currentRole = useAdminRole();
   const mpkRoles = useAdminMpkRoles();
 
-  const [q, setQ] = useState(() => sp.get("q") ?? "");
-  const [role, setRole] = useState<AdminMpkRole | "">((sp.get("role") as AdminMpkRole | "") ?? "");
-  const [sortKey, setSortKey] = useState<keyof Row>((sp.get("sortKey") as keyof Row) ?? "name");
-  const [sortDir, setSortDir] = useState<SortDir>((sp.get("sortDir") as SortDir) ?? "asc");
+  const { initial, setUrl } = useUrlState<{
+    q: string;
+    role: AdminMpkRole | "";
+    sortKey: keyof Row;
+    sortDir: SortDir;
+  }>({
+    q: "",
+    role: "",
+    sortKey: "name",
+    sortDir: "asc",
+  });
+  const [q, setQ] = useState(initial.q);
+  const [role, setRole] = useState<AdminMpkRole | "">(initial.role);
+  const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
+  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q);
-    if (role) params.set("role", role);
-    params.set("sortKey", String(sortKey));
-    params.set("sortDir", sortDir);
-    const url = params.toString() ? `/admin/mpk?${params.toString()}` : `/admin/mpk`;
-    const id = setTimeout(() => router.replace(url), 300);
-    return () => clearTimeout(id);
-  }, [q, role, sortKey, sortDir, router]);
+  // Synchronizuj URL przy zmianie filtrów/sortowania
+  useMemo(() => {
+    setUrl({ q, role, sortKey, sortDir }, "/admin/mpk");
+  }, [q, role, sortKey, sortDir, setUrl]);
 
   const rows = useMemo(() => {
     const filtered = BASE_ROWS.filter((r) => {

@@ -1,6 +1,5 @@
 "use client";
-import { useMemo, useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState, Suspense } from "react";
 import { Guard } from "@/components/admin/Guard";
 import { can, explain } from "@/lib/rbac";
 import { useAdminRole } from "@/app/admin/_UserContext";
@@ -8,6 +7,7 @@ import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_CONTACTS, type AdminContact } from "@/app/admin/_mocks";
+import { useUrlState } from "@/lib/useUrlState";
 
 
 type Row = AdminContact;
@@ -28,23 +28,25 @@ export default function AdminContactsPage() {
 }
 
 function ContactsPageInner() {
-  const router = useRouter();
-  const sp = useSearchParams();
   const currentRole = useAdminRole();
 
-  const [q, setQ] = useState(() => sp.get("q") ?? "");
-  const [sortKey, setSortKey] = useState<keyof Row>((sp.get("sortKey") as keyof Row) ?? "name");
-  const [sortDir, setSortDir] = useState<SortDir>((sp.get("sortDir") as SortDir) ?? "asc");
+  const { initial, setUrl } = useUrlState<{
+    q: string;
+    sortKey: keyof Row;
+    sortDir: SortDir;
+  }>({
+    q: "",
+    sortKey: "name",
+    sortDir: "asc",
+  });
+  const [q, setQ] = useState(initial.q);
+  const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
+  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q);
-    params.set("sortKey", String(sortKey));
-    params.set("sortDir", sortDir);
-    const url = params.toString() ? `/admin/contacts?${params.toString()}` : `/admin/contacts`;
-    const id = setTimeout(() => router.replace(url), 300);
-    return () => clearTimeout(id);
-  }, [q, sortKey, sortDir, router]);
+  // Synchronizuj URL przy zmianie filtrów/sortowania
+  useMemo(() => {
+    setUrl({ q, sortKey, sortDir }, "/admin/contacts");
+  }, [q, sortKey, sortDir, setUrl]);
 
   const rows = useMemo(() => {
     const ql = q.toLowerCase().trim();

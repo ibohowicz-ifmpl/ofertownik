@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, useEffect, Suspense } from "react";
 import { Modal } from "@/components/admin/Modal";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useUrlState } from "@/lib/useUrlState";
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_USERS, type AdminUser, type AdminUserRole } from "@/app/admin/_mocks";
@@ -29,35 +29,27 @@ export default function AdminUsersPage() {
 }
 
 function UsersPageInner() {
-  const router = useRouter();
-  const sp = useSearchParams();
   const currentRole = useAdminRole();
+  const { initial, setUrl } = useUrlState<{
+    q: string;
+    role: AdminUserRole | "";
+    sortKey: keyof Row;
+    sortDir: SortDir;
+  }>({
+    q: "",
+    role: "",
+    sortKey: "name",
+    sortDir: "asc",
+  });
 
-  const [q, setQ] = useState(() => sp.get("q") ?? "");
-  const [role, setRole] = useState<AdminUserRole | "">(
-    (sp.get("role") as AdminUserRole | "") ?? ""
-  );
-  const [sortKey, setSortKey] = useState<keyof Row>(
-    ((sp.get("sortKey") as keyof Row) ?? "name")
-  );
-  const [sortDir, setSortDir] = useState<SortDir>(
-    ((sp.get("sortDir") as SortDir) ?? "asc")
-  );
+  const [q, setQ] = useState(initial.q);
+  const [role, setRole] = useState<AdminUserRole | "">(initial.role);
+  const [sortKey, setSortKey] = useState<keyof Row>(initial.sortKey);
+  const [sortDir, setSortDir] = useState<SortDir>(initial.sortDir);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q);
-    if (role) params.set("role", role);
-    if (sortKey) params.set("sortKey", String(sortKey));
-    if (sortDir) params.set("sortDir", sortDir);
-
-    const url = params.toString()
-      ? `/admin/users?${params.toString()}`
-      : `/admin/users`;
-
-    const id = setTimeout(() => router.replace(url), 300);
-    return () => clearTimeout(id);
-  }, [q, role, sortKey, sortDir, router]);
+    setUrl({ q, role, sortKey, sortDir }, "/admin/users");
+  }, [q, role, sortKey, sortDir, setUrl]);
 
   const rows = useMemo(() => {
     const ql = q.toLowerCase().trim();
