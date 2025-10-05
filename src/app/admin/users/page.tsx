@@ -1,13 +1,13 @@
 "use client";
-import { useMemo, useState } from "react";
-import { Guard } from "@/components/admin/Guard";
-import { can, explain } from "@/lib/rbac";
-import { useAdminRole } from "@/app/admin/_UserContext";
-
-import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
+import { useMemo, useState, useEffect, Suspense } from "react";
 import { Modal } from "@/components/admin/Modal";
+import { useRouter, useSearchParams } from "next/navigation";
+import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_USERS, type AdminUser, type AdminUserRole } from "@/app/admin/_mocks";
+import { Guard } from "@/components/admin/Guard";
+import { useAdminRole } from "@/app/admin/_UserContext";
+import { can, explain } from "@/lib/rbac";
 
 type Row = AdminUser;
 const BASE_ROWS = MOCK_USERS;
@@ -19,12 +19,45 @@ const cols = defineCols<Row>()([
   { key: "role", header: "Rola" },
 ] as const);
 
+
 export default function AdminUsersPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-500">Ładowanie…</div>}>
+      <UsersPageInner />
+    </Suspense>
+  );
+}
+
+function UsersPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const currentRole = useAdminRole();
-  const [q, setQ] = useState("");
-  const [role, setRole] = useState<AdminUserRole | "">("");
-  const [sortKey, setSortKey] = useState<keyof Row>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const [q, setQ] = useState(() => sp.get("q") ?? "");
+  const [role, setRole] = useState<AdminUserRole | "">(
+    (sp.get("role") as AdminUserRole | "") ?? ""
+  );
+  const [sortKey, setSortKey] = useState<keyof Row>(
+    ((sp.get("sortKey") as keyof Row) ?? "name")
+  );
+  const [sortDir, setSortDir] = useState<SortDir>(
+    ((sp.get("sortDir") as SortDir) ?? "asc")
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q);
+    if (role) params.set("role", role);
+    if (sortKey) params.set("sortKey", String(sortKey));
+    if (sortDir) params.set("sortDir", sortDir);
+
+    const url = params.toString()
+      ? `/admin/users?${params.toString()}`
+      : `/admin/users`;
+
+    const id = setTimeout(() => router.replace(url), 300);
+    return () => clearTimeout(id);
+  }, [q, role, sortKey, sortDir, router]);
 
   const rows = useMemo(() => {
     const ql = q.toLowerCase().trim();

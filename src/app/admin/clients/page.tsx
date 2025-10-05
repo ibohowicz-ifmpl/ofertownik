@@ -1,17 +1,17 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Guard } from "@/components/admin/Guard";
 import { can, explain } from "@/lib/rbac";
 import { useAdminRole } from "@/app/admin/_UserContext";
-
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_CLIENTS, type AdminClient } from "@/app/admin/_mocks";
 
+
 type Row = AdminClient;
 const BASE_ROWS = MOCK_CLIENTS;
-
 const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Nazwa klienta" },
@@ -19,10 +19,31 @@ const cols = defineCols<Row>()([
 ] as const);
 
 export default function AdminClientsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-500">Ładowanie…</div>}>
+      <ClientsPageInner />
+    </Suspense>
+  );
+}
+
+function ClientsPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const currentRole = useAdminRole();
-  const [q, setQ] = useState("");
-  const [sortKey, setSortKey] = useState<keyof Row>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const [q, setQ] = useState(() => sp.get("q") ?? "");
+  const [sortKey, setSortKey] = useState<keyof Row>((sp.get("sortKey") as keyof Row) ?? "name");
+  const [sortDir, setSortDir] = useState<SortDir>((sp.get("sortDir") as SortDir) ?? "asc");
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q);
+    params.set("sortKey", String(sortKey));
+    params.set("sortDir", sortDir);
+    const url = params.toString() ? `/admin/clients?${params.toString()}` : `/admin/clients`;
+    const id = setTimeout(() => router.replace(url), 300);
+    return () => clearTimeout(id);
+  }, [q, sortKey, sortDir, router]);
 
   const rows = useMemo(() => {
     const ql = q.toLowerCase().trim();

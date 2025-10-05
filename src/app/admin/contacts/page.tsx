@@ -1,17 +1,17 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Guard } from "@/components/admin/Guard";
 import { can, explain } from "@/lib/rbac";
 import { useAdminRole } from "@/app/admin/_UserContext";
-
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_CONTACTS, type AdminContact } from "@/app/admin/_mocks";
 
+
 type Row = AdminContact;
 const BASE_ROWS = MOCK_CONTACTS;
-
 const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Imię i nazwisko" },
@@ -20,10 +20,31 @@ const cols = defineCols<Row>()([
 ] as const);
 
 export default function AdminContactsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-500">Ładowanie…</div>}>
+      <ContactsPageInner />
+    </Suspense>
+  );
+}
+
+function ContactsPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const currentRole = useAdminRole();
-  const [q, setQ] = useState("");
-  const [sortKey, setSortKey] = useState<keyof Row>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const [q, setQ] = useState(() => sp.get("q") ?? "");
+  const [sortKey, setSortKey] = useState<keyof Row>((sp.get("sortKey") as keyof Row) ?? "name");
+  const [sortDir, setSortDir] = useState<SortDir>((sp.get("sortDir") as SortDir) ?? "asc");
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q);
+    params.set("sortKey", String(sortKey));
+    params.set("sortDir", sortDir);
+    const url = params.toString() ? `/admin/contacts?${params.toString()}` : `/admin/contacts`;
+    const id = setTimeout(() => router.replace(url), 300);
+    return () => clearTimeout(id);
+  }, [q, sortKey, sortDir, router]);
 
   const rows = useMemo(() => {
     const ql = q.toLowerCase().trim();

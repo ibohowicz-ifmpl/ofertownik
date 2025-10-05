@@ -1,17 +1,17 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Guard } from "@/components/admin/Guard";
 import { canOnMpk, explainOnMpk } from "@/lib/rbac";
 import { useAdminRole, useAdminMpkRoles } from "@/app/admin/_UserContext";
-
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
 import { MOCK_MPK, type AdminMpk, type AdminMpkRole } from "@/app/admin/_mocks";
 
+
 type Row = AdminMpk;
 const BASE_ROWS = MOCK_MPK;
-
 const cols = defineCols<Row>()([
   { key: "code", header: "MPK" },
   { key: "name", header: "Nazwa jednostki" },
@@ -19,12 +19,34 @@ const cols = defineCols<Row>()([
 ] as const);
 
 export default function AdminMpkPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-500">Ładowanie…</div>}>
+      <MpkPageInner />
+    </Suspense>
+  );
+}
+
+function MpkPageInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
   const currentRole = useAdminRole();
   const mpkRoles = useAdminMpkRoles();
-  const [q, setQ] = useState("");
-  const [role, setRole] = useState<AdminMpkRole | "">("");
-  const [sortKey, setSortKey] = useState<keyof Row>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const [q, setQ] = useState(() => sp.get("q") ?? "");
+  const [role, setRole] = useState<AdminMpkRole | "">((sp.get("role") as AdminMpkRole | "") ?? "");
+  const [sortKey, setSortKey] = useState<keyof Row>((sp.get("sortKey") as keyof Row) ?? "name");
+  const [sortDir, setSortDir] = useState<SortDir>((sp.get("sortDir") as SortDir) ?? "asc");
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q);
+    if (role) params.set("role", role);
+    params.set("sortKey", String(sortKey));
+    params.set("sortDir", sortDir);
+    const url = params.toString() ? `/admin/mpk?${params.toString()}` : `/admin/mpk`;
+    const id = setTimeout(() => router.replace(url), 300);
+    return () => clearTimeout(id);
+  }, [q, role, sortKey, sortDir, router]);
 
   const rows = useMemo(() => {
     const filtered = BASE_ROWS.filter((r) => {
@@ -98,10 +120,10 @@ export default function AdminMpkPage() {
             >
               + Dodaj
             </button>
-        <p className="text-xs text-gray-500 mt-2">
-          Klik wiersza edytuje tylko, jeśli {'{role}'} w danym MPK ma prawo „edit”.
-          Brak edycji = "{explainOnMpk(mpkRoles, "Q22-OPS", "edit") ?? "OK"}" (przykład dla Q22-OPS).
-        </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Klik wiersza edytuje tylko, jeśli {'{role}'} w danym MPK ma prawo „edit”.
+              Brak edycji = "{explainOnMpk(mpkRoles, "Q22-OPS", "edit") ?? "OK"}" (przykład dla Q22-OPS).
+            </p>
           </div>
         </div>
 
