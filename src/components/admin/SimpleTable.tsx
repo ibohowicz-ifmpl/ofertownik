@@ -1,10 +1,18 @@
-type Col<T> = { key: keyof T; header: string };
+type KeyOf<T> = Extract<keyof T, string>;
+type Col<T> = { key: KeyOf<T>; header: string };
+
+export function defineCols<T>() {
+  return <U extends readonly Col<T>[]>(u: U) => u;
+}
 
 export function SimpleTable<T extends Record<string, unknown>>({
-  cols, rows, empty = "Brak danych", onRowClick,
+  cols,
+  rows,
+  empty = "Brak danych",
+  onRowClick,
 }: {
-  cols: Col<T>[];
-  rows: T[];
+  cols: readonly Col<T>[];
+  rows: readonly T[];
   empty?: string;
   onRowClick?: (row: T) => void;
 }) {
@@ -14,10 +22,7 @@ export function SimpleTable<T extends Record<string, unknown>>({
         <thead className="bg-gray-50">
           <tr>
             {cols.map((c) => (
-              <th
-                key={String(c.key)}
-                className="px-3 py-2 text-left text-sm font-medium text-gray-700 border-b"
-              >
+              <th key={c.key} className="px-3 py-2 text-left text-sm font-medium text-gray-700 border-b">
                 {c.header}
               </th>
             ))}
@@ -32,10 +37,14 @@ export function SimpleTable<T extends Record<string, unknown>>({
             </tr>
           ) : (
             rows.map((r, i) => (
-              <tr key={i} className="odd:bg-white even:bg-gray-50 hover:bg-gray-100 cursor-pointer" onClick={() => onRowClick?.(r)}>
+              <tr
+                key={i}
+                className="odd:bg-white even:bg-gray-50 hover:bg-gray-100 cursor-pointer"
+                onClick={() => onRowClick?.(r)}
+              >
                 {cols.map((c) => (
-                  <td key={String(c.key)} className="px-3 py-2 text-sm text-gray-800 border-b">
-                    {String((r as Record<string, unknown>)[c.key as string] ?? "—")}
+                  <td key={c.key} className="px-3 py-2 text-sm text-gray-800 border-b">
+                    {String(r[c.key] ?? "—")}
                   </td>
                 ))}
               </tr>

@@ -1,26 +1,22 @@
 "use client";
 import { useMemo, useState } from "react";
-import { SimpleTable } from "@/components/admin/SimpleTable";
+import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
+import { MOCK_MPK, type AdminMpk, type AdminMpkRole } from "@/app/admin/_mocks";
 
-type Role = "LEADER" | "MANAGER" | "PM" | "VIEWER";
-type Row = { code: string; name: string; defaultRole: Role };
+type Row = AdminMpk;
+const BASE_ROWS = MOCK_MPK;
 
-const BASE_ROWS: Row[] = [
-  { code: "Q22-OPS", name: "Q22 – Operacje", defaultRole: "MANAGER" },
-  { code: "PU-TECH", name: "Plac Unii – Techniczne", defaultRole: "PM" },
-];
-
-const cols = [
+const cols = defineCols<Row>()([
   { key: "code", header: "MPK" },
   { key: "name", header: "Nazwa jednostki" },
   { key: "defaultRole", header: "Domyślna rola" },
-] as const;
+] as const);
 
 export default function AdminMpkPage() {
   const [q, setQ] = useState("");
-  const [role, setRole] = useState<Role | "">("");
+  const [role, setRole] = useState<AdminMpkRole | "">("");
   const [sortKey, setSortKey] = useState<keyof Row>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -64,7 +60,7 @@ export default function AdminMpkPage() {
         />
         <select
           value={role}
-          onChange={(e) => setRole((e.target.value || "") as Role | "")}
+          onChange={(e) => setRole((e.target.value || "") as AdminMpkRole | "")}
           className="rounded border border-gray-300 px-3 py-1"
         >
           <option value="">Wszystkie role</option>
@@ -93,7 +89,7 @@ export default function AdminMpkPage() {
         </div>
       </div>
 
-      <SimpleTable cols={cols as any} rows={rows} onRowClick={(r) => onRowClick(r as Row)} />
+      <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
 
       <Modal
         open={openAdd}

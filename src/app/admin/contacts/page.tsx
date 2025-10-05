@@ -1,22 +1,19 @@
 "use client";
 import { useMemo, useState } from "react";
-import { SimpleTable } from "@/components/admin/SimpleTable";
+import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
+import { MOCK_CONTACTS, type AdminContact } from "@/app/admin/_mocks";
 
-type Row = { id: string; name: string; email: string; client: string };
+type Row = AdminContact;
+const BASE_ROWS = MOCK_CONTACTS;
 
-const BASE_ROWS: Row[] = [
-  { id: "p_001", name: "Michał Example", email: "m.example@firma.pl", client: "RTV EURO AGD" },
-  { id: "p_002", name: "Katarzyna Example", email: "k.example@firma.pl", client: "Circle K Polska" },
-];
-
-const cols = [
+const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Imię i nazwisko" },
   { key: "email", header: "Email" },
   { key: "client", header: "Klient" },
-] as const;
+] as const);
 
 export default function AdminContactsPage() {
   const [q, setQ] = useState("");
@@ -80,7 +77,7 @@ export default function AdminContactsPage() {
         </div>
       </div>
 
-      <SimpleTable cols={cols as any} rows={rows} onRowClick={(r) => onRowClick(r as Row)} />
+      <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
 
       <Modal open={openAdd} onClose={() => setOpenAdd(false)} title="Dodaj kontakt (placeholder)"
         actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>

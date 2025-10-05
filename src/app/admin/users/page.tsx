@@ -1,39 +1,35 @@
 "use client";
 import { useMemo, useState } from "react";
-import { SimpleTable } from "@/components/admin/SimpleTable";
+import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
+import { MOCK_USERS, type AdminUser, type AdminUserRole } from "@/app/admin/_mocks";
 
-type Role = "LEADER" | "MANAGER" | "PM" | "VIEWER";
-type Row = { id: string; name: string; email: string; role: Role };
+type Row = AdminUser;
+const BASE_ROWS = MOCK_USERS;
 
-const BASE_ROWS: Row[] = [
-  { id: "u_001", name: "Jan Kowalski", email: "jan.kowalski@ifm.pl", role: "LEADER" },
-  { id: "u_002", name: "Anna Nowak", email: "anna.nowak@ifm.pl", role: "PM" },
-  { id: "u_003", name: "Piotr Admin", email: "piotr.admin@ifm.pl", role: "MANAGER" },
-];
-
-const cols = [
-  { key: "id", header: "ID" },
-  { key: "name", header: "Imię i nazwisko" },
+const cols = defineCols<Row>()([
+  { key: "id",    header: "ID" },
+  { key: "name",  header: "Imię i nazwisko" },
   { key: "email", header: "Email" },
-  { key: "role", header: "Rola" },
-] as const;
+  { key: "role",  header: "Rola" },
+] as const);
 
 export default function AdminUsersPage() {
   const [q, setQ] = useState("");
-  const [role, setRole] = useState<Role | "">("");
+  const [role, setRole] = useState<AdminUserRole | "">("");
   const [sortKey, setSortKey] = useState<keyof Row>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const rows = useMemo(() => {
+    const ql = q.toLowerCase().trim();
     const filtered = BASE_ROWS.filter((r) => {
-      const hitRole = role ? r.role === role : true;
+      const hitRole = !role || String(r.role) === role;
       const hitText =
-        q.trim() === "" ||
-        r.name.toLowerCase().includes(q.toLowerCase()) ||
-        r.email.toLowerCase().includes(q.toLowerCase()) ||
-        r.id.toLowerCase().includes(q.toLowerCase());
+        !ql ||
+        r.name.toLowerCase().includes(ql) ||
+        r.email.toLowerCase().includes(ql) ||
+        r.id.toLowerCase().includes(ql);
       return hitRole && hitText;
     });
 
@@ -72,7 +68,7 @@ export default function AdminUsersPage() {
         />
         <select
           value={role}
-          onChange={(e) => setRole((e.target.value || "") as Role | "")}
+          onChange={(e) => setRole((e.target.value || "") as AdminUserRole | "")}
           className="rounded border border-gray-300 px-3 py-1"
         >
           <option value="">Wszystkie role</option>
@@ -103,7 +99,7 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      <SimpleTable cols={cols as any} rows={rows} onRowClick={(r) => onRowClick(r as Row)} />
+      <SimpleTable cols={cols} rows={rows} onRowClick={(r) => onRowClick(r)} />
 
       {/* Modal dodawania użytkownika */}
       <Modal

@@ -1,21 +1,18 @@
 "use client";
 import { useMemo, useState } from "react";
-import { SimpleTable } from "@/components/admin/SimpleTable";
+import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
+import { MOCK_CLIENTS, type AdminClient } from "@/app/admin/_mocks";
 
-type Row = { id: string; name: string; nip: string };
+type Row = AdminClient;
+const BASE_ROWS = MOCK_CLIENTS;
 
-const BASE_ROWS: Row[] = [
-  { id: "c_001", name: "RTV EURO AGD", nip: "5270002721" },
-  { id: "c_002", name: "Circle K Polska", nip: "5260210595" },
-];
-
-const cols = [
+const cols = defineCols<Row>()([
   { key: "id", header: "ID" },
   { key: "name", header: "Nazwa klienta" },
   { key: "nip", header: "NIP" },
-] as const;
+] as const);
 
 export default function AdminClientsPage() {
   const [q, setQ] = useState("");
@@ -77,7 +74,7 @@ export default function AdminClientsPage() {
         </div>
       </div>
 
-      <SimpleTable cols={cols as any} rows={rows} onRowClick={(r) => onRowClick(r as Row)} />
+      <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
 
       <Modal open={openAdd} onClose={() => setOpenAdd(false)} title="Dodaj klienta (placeholder)"
         actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
