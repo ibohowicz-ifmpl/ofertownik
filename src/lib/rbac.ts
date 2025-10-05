@@ -1,3 +1,12 @@
+export function explain(role: Role, action: Action, resource: Resource): string | null {
+  return can(role, action, resource) ? null : `Brak uprawnienia: ${role} → ${action} ${resource}`;
+}
+
+// Per-MPK
+export function explainOnMpk(mpkRoles: MpkRolesMap, mpkCode: string, action: Action): string | null {
+  const role = mpkRoles[mpkCode] ?? "VIEWER";
+  return can(role, action, "mpk") ? null : `MPK ${mpkCode}: ${role} nie ma uprawnienia ${action}`;
+}
 // --- RBAC per MPK ---
 
 // Rola użytkownika w konkretnym MPK (np. { "Q22-OPS": "MANAGER", "PU-TECH": "PM" })

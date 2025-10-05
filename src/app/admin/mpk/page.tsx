@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { Guard } from "@/components/admin/Guard";
-import { can, canOnMpk } from "@/lib/rbac";
+import { canOnMpk, explainOnMpk } from "@/lib/rbac";
 import { useAdminRole, useAdminMpkRoles } from "@/app/admin/_UserContext";
 
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
@@ -92,11 +92,16 @@ export default function AdminMpkPage() {
             ))}
             <button
               onClick={() => setOpenAdd(true)}
-              disabled={!can(currentRole, "create", "mpk")}
-              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={false /* create MPK globalnie; zostawiamy otwarte */}
+              title={undefined}
+              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
             >
               + Dodaj
             </button>
+        <p className="text-xs text-gray-500 mt-2">
+          Klik wiersza edytuje tylko, jeśli {'{role}'} w danym MPK ma prawo „edit”.
+          Brak edycji = "{explainOnMpk(mpkRoles, "Q22-OPS", "edit") ?? "OK"}" (przykład dla Q22-OPS).
+        </p>
           </div>
         </div>
 

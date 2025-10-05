@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { Guard } from "@/components/admin/Guard";
-import { can } from "@/lib/rbac";
+import { can, explain } from "@/lib/rbac";
 import { useAdminRole } from "@/app/admin/_UserContext";
 
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
@@ -80,6 +80,7 @@ export default function AdminContactsPage() {
             <button
               onClick={() => setOpenAdd(true)}
               disabled={!can(currentRole, "create", "contacts")}
+              title={explain(currentRole, "create", "contacts") ?? undefined}
               className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               + Dodaj
