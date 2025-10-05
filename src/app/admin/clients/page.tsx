@@ -1,5 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
+import { Guard } from "@/components/admin/Guard";
+import { can } from "@/lib/rbac";
+import { useAdminRole } from "@/app/admin/_UserContext";
+
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
@@ -15,6 +19,7 @@ const cols = defineCols<Row>()([
 ] as const);
 
 export default function AdminClientsPage() {
+  const currentRole = useAdminRole();
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<keyof Row>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -44,53 +49,59 @@ export default function AdminClientsPage() {
 
   const [openAdd, setOpenAdd] = useState(false);
   const [editRow, setEditRow] = useState<Row | null>(null);
-  const onRowClick = (r: Row) => setEditRow(r);
+  const onRowClick = (r: Row) => {
+    if (!can(currentRole, "edit", "clients")) return;
+    setEditRow(r);
+  };
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-2 flex-wrap items-center">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Szukaj po nazwie, NIP, ID…"
-          className="rounded border border-gray-300 px-3 py-1"
-        />
-        <div className="ml-auto flex gap-2">
-          {(["name", "nip"] as (keyof Row)[]).map((k) => (
+    <Guard role={currentRole} resource="clients">
+      <div className="space-y-3">
+        <div className="flex gap-2 flex-wrap items-center">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Szukaj po nazwie, NIP, ID…"
+            className="rounded border border-gray-300 px-3 py-1"
+          />
+          <div className="ml-auto flex gap-2">
+            {(["name", "nip"] as (keyof Row)[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => toggleSort(k)}
+                className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
+              >
+                {k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              </button>
+            ))}
             <button
-              key={k}
-              onClick={() => toggleSort(k)}
-              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
+              onClick={() => setOpenAdd(true)}
+              disabled={!can(currentRole, "create", "clients")}
+              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {k}{sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              + Dodaj
             </button>
-          ))}
-          <button
-            onClick={() => setOpenAdd(true)}
-            className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
-          >
-            + Dodaj
-          </button>
+          </div>
         </div>
+
+        <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
+
+        <Modal open={openAdd} onClose={() => setOpenAdd(false)} title="Dodaj klienta (placeholder)"
+          actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
+          <form className="grid gap-3">
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Nazwa klienta" />
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="NIP (tylko cyfry)" />
+          </form>
+        </Modal>
+
+        <Modal open={!!editRow} onClose={() => setEditRow(null)} title={`Edytuj klienta: ${editRow?.name ?? ""} (placeholder)`}
+          actions={<button onClick={() => setEditRow(null)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
+          <form className="grid gap-3">
+            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
+            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.nip ?? ""} />
+          </form>
+        </Modal>
       </div>
-
-      <SimpleTable cols={cols} rows={rows} onRowClick={onRowClick} />
-
-      <Modal open={openAdd} onClose={() => setOpenAdd(false)} title="Dodaj klienta (placeholder)"
-        actions={<button onClick={() => setOpenAdd(false)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
-        <form className="grid gap-3">
-          <input className="rounded border border-gray-300 px-3 py-1" placeholder="Nazwa klienta" />
-          <input className="rounded border border-gray-300 px-3 py-1" placeholder="NIP (tylko cyfry)" />
-        </form>
-      </Modal>
-
-      <Modal open={!!editRow} onClose={() => setEditRow(null)} title={`Edytuj klienta: ${editRow?.name ?? ""} (placeholder)`}
-        actions={<button onClick={() => setEditRow(null)} className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700">Zapisz (mock)</button>}>
-        <form className="grid gap-3">
-          <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
-          <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.nip ?? ""} />
-        </form>
-      </Modal>
-    </div>
+    </Guard>
   );
 }

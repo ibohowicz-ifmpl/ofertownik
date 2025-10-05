@@ -1,5 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
+import { Guard } from "@/components/admin/Guard";
+import { can } from "@/lib/rbac";
+import { useAdminRole } from "@/app/admin/_UserContext";
+
 import { SimpleTable, defineCols } from "@/components/admin/SimpleTable";
 import { Modal } from "@/components/admin/Modal";
 import { compareBy, type SortDir } from "@/lib/sort";
@@ -9,13 +13,14 @@ type Row = AdminUser;
 const BASE_ROWS = MOCK_USERS;
 
 const cols = defineCols<Row>()([
-  { key: "id",    header: "ID" },
-  { key: "name",  header: "Imię i nazwisko" },
+  { key: "id", header: "ID" },
+  { key: "name", header: "Imię i nazwisko" },
   { key: "email", header: "Email" },
-  { key: "role",  header: "Rola" },
+  { key: "role", header: "Rola" },
 ] as const);
 
 export default function AdminUsersPage() {
+  const currentRole = useAdminRole();
   const [q, setQ] = useState("");
   const [role, setRole] = useState<AdminUserRole | "">("");
   const [sortKey, setSortKey] = useState<keyof Row>("name");
@@ -58,100 +63,103 @@ export default function AdminUsersPage() {
   const onRowClick = (r: Row) => setEditRow(r);
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-2 flex-wrap items-center">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Szukaj po nazwie, emailu, ID…"
-          className="rounded border border-gray-300 px-3 py-1"
-        />
-        <select
-          value={role}
-          onChange={(e) => setRole((e.target.value || "") as AdminUserRole | "")}
-          className="rounded border border-gray-300 px-3 py-1"
-        >
-          <option value="">Wszystkie role</option>
-          <option value="LEADER">LEADER</option>
-          <option value="MANAGER">MANAGER</option>
-          <option value="PM">PM</option>
-          <option value="VIEWER">VIEWER</option>
-        </select>
+    <Guard role={currentRole} resource="users">
+      <div className="space-y-3">
+        <div className="flex gap-2 flex-wrap items-center">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Szukaj po nazwie, emailu, ID…"
+            className="rounded border border-gray-300 px-3 py-1"
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole((e.target.value || "") as AdminUserRole | "")}
+            className="rounded border border-gray-300 px-3 py-1"
+          >
+            <option value="">Wszystkie role</option>
+            <option value="LEADER">LEADER</option>
+            <option value="MANAGER">MANAGER</option>
+            <option value="PM">PM</option>
+            <option value="VIEWER">VIEWER</option>
+          </select>
 
-        <div className="ml-auto flex gap-2">
-          {(["name", "email", "role"] as (keyof Row)[]).map((k) => (
+          <div className="ml-auto flex gap-2">
+            {(["name", "email", "role"] as (keyof Row)[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => toggleSort(k)}
+                className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
+                title={`Sortuj po ${k}`}
+              >
+                {k}
+                {sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              </button>
+            ))}
             <button
-              key={k}
-              onClick={() => toggleSort(k)}
-              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
-              title={`Sortuj po ${k}`}
+              onClick={() => setOpenAdd(true)}
+              disabled={!can(currentRole, "create", "users")}
+              className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {k}
-              {sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              + Dodaj użytkownika
             </button>
-          ))}
-          <button
-            onClick={() => setOpenAdd(true)}
-            className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50"
-          >
-            + Dodaj użytkownika
-          </button>
+          </div>
         </div>
+
+        <SimpleTable cols={cols} rows={rows} onRowClick={(r) => onRowClick(r)} />
+
+        {/* Modal dodawania użytkownika */}
+        <Modal
+          open={openAdd}
+          onClose={() => setOpenAdd(false)}
+          title="Dodaj użytkownika (placeholder)"
+          actions={
+            <button
+              onClick={() => setOpenAdd(false)}
+              className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
+            >
+              Zapisz (mock)
+            </button>
+          }
+        >
+          <form className="grid gap-3">
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Imię i nazwisko" />
+            <input className="rounded border border-gray-300 px-3 py-1" placeholder="Email" />
+            <select className="rounded border border-gray-300 px-3 py-1" defaultValue="VIEWER">
+              <option value="LEADER">LEADER</option>
+              <option value="MANAGER">MANAGER</option>
+              <option value="PM">PM</option>
+              <option value="VIEWER">VIEWER</option>
+            </select>
+          </form>
+        </Modal>
+
+        {/* Modal edycji użytkownika */}
+        <Modal
+          open={!!editRow}
+          onClose={() => setEditRow(null)}
+          title={`Edytuj użytkownika: ${editRow?.name ?? ""} (placeholder)`}
+          actions={
+            <button
+              onClick={() => setEditRow(null)}
+              className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
+            >
+              Zapisz (mock)
+            </button>
+          }
+        >
+          <form className="grid gap-3">
+            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
+            <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.email ?? ""} />
+            <select className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.role ?? "VIEWER"}>
+              <option value="LEADER">LEADER</option>
+              <option value="MANAGER">MANAGER</option>
+              <option value="PM">PM</option>
+              <option value="VIEWER">VIEWER</option>
+            </select>
+          </form>
+        </Modal>
       </div>
-
-      <SimpleTable cols={cols} rows={rows} onRowClick={(r) => onRowClick(r)} />
-
-      {/* Modal dodawania użytkownika */}
-      <Modal
-        open={openAdd}
-        onClose={() => setOpenAdd(false)}
-        title="Dodaj użytkownika (placeholder)"
-        actions={
-          <button
-            onClick={() => setOpenAdd(false)}
-            className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
-          >
-            Zapisz (mock)
-          </button>
-        }
-      >
-        <form className="grid gap-3">
-          <input className="rounded border border-gray-300 px-3 py-1" placeholder="Imię i nazwisko" />
-          <input className="rounded border border-gray-300 px-3 py-1" placeholder="Email" />
-          <select className="rounded border border-gray-300 px-3 py-1" defaultValue="VIEWER">
-            <option value="LEADER">LEADER</option>
-            <option value="MANAGER">MANAGER</option>
-            <option value="PM">PM</option>
-            <option value="VIEWER">VIEWER</option>
-          </select>
-        </form>
-      </Modal>
-
-      {/* Modal edycji użytkownika */}
-      <Modal
-        open={!!editRow}
-        onClose={() => setEditRow(null)}
-        title={`Edytuj użytkownika: ${editRow?.name ?? ""} (placeholder)`}
-        actions={
-          <button
-            onClick={() => setEditRow(null)}
-            className="rounded border border-blue-600 bg-blue-600 text-white px-3 py-1 hover:bg-blue-700"
-          >
-            Zapisz (mock)
-          </button>
-        }
-      >
-        <form className="grid gap-3">
-          <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.name ?? ""} />
-          <input className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.email ?? ""} />
-          <select className="rounded border border-gray-300 px-3 py-1" defaultValue={editRow?.role ?? "VIEWER"}>
-            <option value="LEADER">LEADER</option>
-            <option value="MANAGER">MANAGER</option>
-            <option value="PM">PM</option>
-            <option value="VIEWER">VIEWER</option>
-          </select>
-        </form>
-      </Modal>
-    </div>
+    </Guard>
   );
 }
